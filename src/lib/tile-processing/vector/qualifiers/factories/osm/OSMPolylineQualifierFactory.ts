@@ -2,9 +2,11 @@ import AbstractQualifierFactory from "~/lib/tile-processing/vector/qualifiers/fa
 import {VectorPolylineDescriptor} from "~/lib/tile-processing/vector/qualifiers/descriptors";
 import {Qualifier, QualifierType} from "~/lib/tile-processing/vector/qualifiers/Qualifier";
 import isUnderground from "~/lib/tile-processing/vector/qualifiers/factories/osm/helpers/isUnderground";
+import isBridge from "~/lib/tile-processing/vector/qualifiers/factories/osm/helpers/isBridge";
 import {
 	parseHeight,
 	parseMeters,
+	readTagAsInt,
 	readTagAsUnsignedInt
 } from "~/lib/tile-processing/vector/qualifiers/factories/osm/helpers/tagHelpers";
 import getPathParamsFromTags
@@ -39,6 +41,11 @@ export default class OSMPolylineQualifierFactory extends AbstractQualifierFactor
 				type: 'path',
 				pathMaterial: params.material
 			};
+
+			if (isBridge(tags)) {
+				descriptor.isBridge = true;
+				descriptor.bridgeLayer = readTagAsInt(tags, 'layer');
+			}
 
 			switch (params.type) {
 				case 'roadway': {

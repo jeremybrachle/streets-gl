@@ -14,6 +14,9 @@ import TileLoadingSystem, {OverpassEndpoint} from "~/app/systems/TileLoadingSyst
 import UISystemState from "~/app/ui/UISystemState";
 import RenderGraphSnapshot from "~/app/ui/RenderGraphSnapshot";
 import UIActions from "~/app/ui/UIActions";
+import Tile from "~/app/objects/Tile";
+import TileObjectsSystem from "~/app/systems/TileObjectsSystem";
+import {hiddenBuildingsRegistry} from "~/app/world/HiddenBuildingsRegistry";
 
 const FPSUpdateInterval = 0.4;
 
@@ -36,9 +39,13 @@ export default class UISystem extends System {
 		overpassEndpoints: [],
 		dataTimestamp: null,
 		driveActive: false,
-		driveSpeed: 0
+		driveSpeed: 0,
+		hiddenBuildingsCount: hiddenBuildingsRegistry.count()
 	};
 	private fpsUpdateTimer = 0;
+	// The currently selected map feature (mirrors the UI atom) so the "delete from view" action knows
+	// which building to hide. Set/cleared by setActiveFeature/clearActiveFeature.
+	private activeFeatureRef: {type: number; id: number} = null;
 
 	public postInit(): void {
 		this.ui = new UI(this.state);
@@ -112,10 +119,43 @@ export default class UISystem extends System {
 			},
 			getControlsStateHash: (): string => {
 				return this.systemManager.getSystem(ControlsSystem).getCurrentStateHash();
+			},
+			// Strata: "delete from view" — hide the currently selected building (e.g. the old GGB
+			// towers), remember it (persisted), and clear the selection.
+			hideActiveBuilding: () => {
+				const feature = this.activeFeatureRef;
+				if (!feature) {
+					return;
+				}
+				const packedId = Tile.packFeatureId(feature.id, feature.type);
+				hiddenBuildingsRegistry.hide(packedId);
+				this.systemManager.getSystem(TileObjectsSystem).hideBuildingNow(packedId);
+				this.pushHiddenBuildingsCount();
+				this.clearActiveFeature();
+			},
+			undoLastHide: () => {
+				const packedId = hiddenBuildingsRegistry.undoLast();
+				if (packedId === null) {
+					return;
+				}
+				this.systemManager.getSystem(TileObjectsSystem).showBuildingNow(packedId);
+				this.pushHiddenBuildingsCount();
+			},
+			restoreAllHidden: () => {
+				const tileObjects = this.systemManager.getSystem(TileObjectsSystem);
+				for (const packedId of hiddenBuildingsRegistry.clear()) {
+					tileObjects.showBuildingNow(packedId);
+				}
+				this.pushHiddenBuildingsCount();
 			}
 		}
 
 		this.ui.update(atoms, actions);
+		this.pushHiddenBuildingsCount();
+	}
+
+	private pushHiddenBuildingsCount(): void {
+		this.ui.setStateFieldValue('hiddenBuildingsCount', hiddenBuildingsRegistry.count());
 	}
 
 	public setResourcesLoadingProgress(progress: number): void {
@@ -127,12 +167,12 @@ export default class UISystem extends System {
 	}
 
 	public setActiveFeature(type: number, id: number): void {
-		console.log(`feature ${type} ${id}`);
-
+		this.activeFeatureRef = {type, id};
 		this.ui.setStateFieldValue('activeFeature', {type, id});
 	}
 
 	public clearActiveFeature(): void {
+		this.activeFeatureRef = null;
 		this.ui.setStateFieldValue('activeFeature', null);
 	}
 

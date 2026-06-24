@@ -26,8 +26,15 @@ import {ExtrudedTextures, ProjectedTextures} from "~/lib/tile-processing/tile3d/
 import VectorNode from "~/lib/tile-processing/vector/features/VectorNode";
 import * as Simplify from "simplify-js";
 import {SurfaceBuilderOrientation} from "~/lib/tile-processing/tile3d/builders/SurfaceBuilder";
+import {cullInstancesNearRoads} from "~/lib/tile-processing/tile3d/handlers/roadProximity";
+import {isDeckedBridgeWay} from "~/lib/tile-processing/tile3d/handlers/deckedBridges";
 
 const TileSize = 611.4962158203125;
+
+// Strata Lane B — scattered trees/shrubs within this many real meters of a road centerline are
+// culled, since OSM forest polygons overlap the roads that cross them. Scaled by mercatorScale to
+// tile units at use (the road graph and instances both live in tile-local mercator space).
+const RoadClearanceMeters = 8;
 
 export default class VectorAreaHandler implements Handler {
 	private readonly osmReference: OSMReference;
@@ -38,6 +45,7 @@ export default class VectorAreaHandler implements Handler {
 	private terrainMaxHeight: number = 0;
 	private multipolygon: Tile3DMultipolygon = null;
 	private instances: Tile3DInstance[] = [];
+	private graph: RoadGraph = null;
 
 	public constructor(feature: VectorArea) {
 		this.osmReference = feature.osmReference;
@@ -67,7 +75,24 @@ export default class VectorAreaHandler implements Handler {
 	}
 
 	public setRoadGraph(graph: RoadGraph): void {
+		this.graph = graph;
+	}
 
+	// Remove scattered instances (trees/shrubs) that fall on a road. Called from getFeatures, by
+	// which point the road graph for the tile is fully built (the provider populates it after the
+	// height pass that scatters the instances). A no-op if no graph was supplied.
+	private cullInstancesOnRoads(): Tile3DInstance[] {
+		if (this.graph === null) {
+			return this.instances;
+		}
+
+		const clearance = RoadClearanceMeters * this.mercatorScale;
+
+		return cullInstancesNearRoads(
+			this.instances,
+			point => this.graph.getClosestProjection(point),
+			clearance
+		);
 	}
 
 	public setMercatorScale(scale: number): void {
@@ -218,6 +243,12 @@ export default class VectorAreaHandler implements Handler {
 	}
 
 	public getFeatures(): Tile3DFeature[] {
+		// The man_made=bridge footprint polygon (rendered as flat grey pavement) for a bridge we draw
+		// our own deck over: skip it so it doesn't show as a phantom flat surface under the deck.
+		if (isDeckedBridgeWay(this.osmReference)) {
+			return [];
+		}
+
 		switch (this.descriptor.type) {
 			case 'building':
 			case 'buildingPart':
@@ -374,11 +405,11 @@ export default class VectorAreaHandler implements Handler {
 				];
 			}
 			case 'forest': {
-				return this.instances;
+				return this.cullInstancesOnRoads();
 			}
 			case 'shrubbery': {
 				return [
-					...this.instances,
+					...this.cullInstancesOnRoads(),
 					...this.handleGenericSurface({
 						textureId: ProjectedTextures.ForestFloor,
 						isOriented: false,

@@ -22,6 +22,7 @@ export interface AtomsCollection {
 	dataTimestamp: RecoilState<Date>;
 	driveActive: RecoilState<boolean>;
 	driveSpeed: RecoilState<number>;
+	hiddenBuildingsCount: RecoilState<number>;
 }
 
 export const getAtoms = (
@@ -92,6 +93,10 @@ export const getAtoms = (
 		driveSpeed: atom({
 			key: 'driveSpeed',
 			effects: [bidirectionalSyncEffect('driveSpeed', commonStorage)]
+		}),
+		hiddenBuildingsCount: atom({
+			key: 'hiddenBuildingsCount',
+			effects: [bidirectionalSyncEffect('hiddenBuildingsCount', commonStorage)]
 		}),
 	};
 }

@@ -18,6 +18,11 @@ export interface VectorPolylineDescriptor {
 	wallType?: 'stone' | 'concrete' | 'hedge';
 	pathMaterial?: 'asphalt' | 'concrete' | 'dirt' | 'sand' | 'gravel' | 'cobblestone' | 'wood';
 	isRoadwayMarked?: boolean;
+	// True when the way carries an OSM bridge=* tag (≠ no). Lets the road pipeline tell a bridge
+	// roadway apart from a ground-hugging one so it can be elevated / suppressed instead of draped
+	// flat onto the terrain. bridgeLayer mirrors OSM layer=* for stacking order.
+	isBridge?: boolean;
+	bridgeLayer?: number;
 	fenceMaterial?: 'wood' | 'chainLink' | 'metal' | 'concrete';
 	width?: number;
 	height?: number;

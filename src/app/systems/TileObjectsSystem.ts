@@ -2,6 +2,7 @@ import TileSystem from "./TileSystem";
 import Tile from "../objects/Tile";
 import TileBuilding from "../world/TileBuilding";
 import System from "../System";
+import {hiddenBuildingsRegistry} from "../world/HiddenBuildingsRegistry";
 
 export default class TileObjectsSystem extends System {
 	private buildingsList: Map<number, TileBuilding> = new Map();
@@ -24,6 +25,29 @@ export default class TileObjectsSystem extends System {
 				building.addParent(tile);
 				this.buildingsList.set(packedId, building);
 			}
+
+			// Strata: re-apply user "delete from view" choices as buildings stream in. addParent made
+			// `tile` this building's holder (the tile that renders it), so hide it there.
+			if (hiddenBuildingsRegistry.isHidden(packedId) && tile.isBuildingVisible(packedId)) {
+				tile.hideBuilding(packedId);
+			}
+		}
+	}
+
+	// Strata: hide a building NOW on its current holder tile (instant — patches the display buffer, no
+	// re-mesh). Used when the user deletes a building they're looking at. No-op if it isn't loaded.
+	public hideBuildingNow(packedId: number): void {
+		const building = this.buildingsList.get(packedId);
+		if (building && building.holder && building.holder.isBuildingVisible(packedId)) {
+			building.holder.hideBuilding(packedId);
+		}
+	}
+
+	// Strata: re-show a previously hidden building (undo / restore all). No-op if it isn't loaded.
+	public showBuildingNow(packedId: number): void {
+		const building = this.buildingsList.get(packedId);
+		if (building && building.holder && !building.holder.isBuildingVisible(packedId)) {
+			building.holder.showBuilding(packedId);
 		}
 	}
 

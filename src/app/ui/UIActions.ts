@@ -10,4 +10,8 @@ export default interface UIActions {
 	setOverpassEndpoints: (endpoints: OverpassEndpoint[]) => void;
 	resetOverpassEndpoints: () => void;
 	getControlsStateHash: () => string;
+	// Strata "delete from view": hide the selected building, undo the last hide, restore all.
+	hideActiveBuilding: () => void;
+	undoLastHide: () => void;
+	restoreAllHidden: () => void;
 }

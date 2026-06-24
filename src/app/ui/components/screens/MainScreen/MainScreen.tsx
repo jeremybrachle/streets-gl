@@ -16,6 +16,8 @@ import styles from './MainScreen.scss';
 import SavedPlacesModalPanel from "~/app/ui/components/SavedPlacesModalPanel";
 import DataTimestamp from "~/app/ui/components/DataTimestamp";
 import Speedometer from "~/app/ui/components/Speedometer";
+import BridgePanel from "~/app/ui/components/BridgePanel";
+import HiddenBuildingsPanel from "~/app/ui/components/HiddenBuildingsPanel";
 
 const MainScreen: React.FC = () => {
 	const atoms = useContext(AtomsContext);
@@ -73,10 +75,12 @@ const MainScreen: React.FC = () => {
 				activeModalWindow === 'savedPlaces' && <SavedPlacesModalPanel onClose={closeModal}/>
 			}
 			{!driveActive && <DebugInfo showRenderGraph={showRenderGraph}/>}
+			{driveActive && <BridgePanel/>}
 			<Speedometer/>
 			<DataTimestamp/>
 			<TimePanel/>
 			<SelectionPanel/>
+			<HiddenBuildingsPanel/>
 			<LegalAttributionPanel/>
 			<CompassPanel/>
 			<GeolocationButton/>

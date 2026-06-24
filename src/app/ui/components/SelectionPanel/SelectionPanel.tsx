@@ -2,7 +2,7 @@ import React, {useCallback, useContext, useEffect, useState} from "react";
 import {useRecoilState} from "recoil";
 import styles from "./SelectionPanel.scss";
 import Panel from "~/app/ui/components/Panel";
-import {AtomsContext} from "~/app/ui/UI";
+import {ActionsContext, AtomsContext} from "~/app/ui/UI";
 import Skeleton, {SkeletonTheme} from "react-loading-skeleton";
 import 'react-loading-skeleton/dist/skeleton.css';
 import buildingTypes from "~/app/ui/components/SelectionPanel/buildingTypes";
@@ -53,6 +53,7 @@ const getTags = (tags: Record<string, string>): JSX.Element => {
 
 const SelectionPanel: React.FC = () => {
 	const atoms = useContext(AtomsContext);
+	const actions = useContext(ActionsContext);
 	const [activeFeature, setActiveFeature] = useRecoilState(atoms.activeFeature);
 	const [description, setDescription] = useState<FeatureDescription>(null);
 
@@ -82,7 +83,15 @@ const SelectionPanel: React.FC = () => {
 		});
 
 		osmRequest.then(async osmResponse => {
-			const osm = await osmResponse.json();
+			// The OSM API returns an empty body for ids it doesn't know (and the response can fail
+			// outright). Guard the JSON parse so clicking such a feature — e.g. the old bridge towers —
+			// shows the panel (with its Hide button) instead of throwing "Unexpected end of JSON input".
+			let osm: {elements?: {tags?: Record<string, string>}[]};
+			try {
+				osm = await osmResponse.json();
+			} catch {
+				return;
+			}
 
 			if (!osm.elements || osm.elements.length === 0) {
 				return;
@@ -104,6 +113,8 @@ const SelectionPanel: React.FC = () => {
 				idURL,
 				tags
 			});
+		}).catch(() => {
+			// Network/CORS failure — leave the panel in its skeleton state; the Hide button still works.
 		});
 	}, [activeFeature]);
 
@@ -187,6 +198,15 @@ const SelectionPanel: React.FC = () => {
 						)
 					}
 				</SkeletonTheme>
+				{/* Strata: hide this feature from the view (e.g. the old GGB towers). Always available
+				    while something is selected — even if the OSM info above failed to load. */}
+				<button
+					type="button"
+					className={styles.hideButton}
+					onClick={(): void => actions.hideActiveBuilding()}
+				>
+					Hide from view
+				</button>
 			</div>
 		</Panel>
 	);

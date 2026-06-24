@@ -20,4 +20,5 @@ export default interface UISystemState {
 	dataTimestamp: Date;
 	driveActive: boolean;
 	driveSpeed: number;
+	hiddenBuildingsCount: number;
 }

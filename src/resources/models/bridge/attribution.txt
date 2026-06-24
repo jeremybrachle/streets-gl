@@ -1,0 +1,6 @@
+Model: "San Francisco Bridge" (https://skfb.ly/6w7T8) by rendorshen
+License: Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/)
+
+Used on the Strata PRODUCT branch only (CC-BY) as the Golden Gate Bridge hero model — NOT
+part of the clean upstream/CC0 contribution. ggb.glb is the lighter-texture variant of the
+two supplied GLBs (identical geometry, ~6 MB vs ~14 MB).

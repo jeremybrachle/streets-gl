@@ -42,8 +42,10 @@ import {AircraftPartTextures} from "~/app/render/textures/createAircraftTexture"
 import PerspectiveCamera from "~/lib/core/PerspectiveCamera";
 import ControlsSystem from "~/app/systems/ControlsSystem";
 import CarMaterialContainer from "~/app/render/materials/CarMaterialContainer";
+import DeckMaterialContainer from "~/app/render/materials/DeckMaterialContainer";
 import {CarWheelMounts, WheelRadius} from "~/app/objects/models/CarModel";
 import Car from "~/app/objects/Car";
+import {bridgeRegistry} from "~/app/bridge/BridgeRegistry";
 
 export default class GBufferPass extends Pass<{
 	GBufferRenderPass: {
@@ -85,9 +87,14 @@ export default class GBufferPass extends Pass<{
 	private advancedInstanceMaterial: AbstractMaterial;
 	private aircraftMaterial: AbstractMaterial;
 	private carMaterial: AbstractMaterial;
+	private deckMaterial: AbstractMaterial;
 	private cameraMatrixWorldInversePrev: Mat4 = null;
 	// Previous-frame car part matrices, for correct TAA motion vectors (index 0 = body/GLB, 1-4 = wheels).
 	private carMatricesPrev: Mat4[] = [];
+	// Previous-frame deck-ribbon origin-relative matrix, for its TAA motion vector.
+	private deckMatrixPrev: Mat4 = null;
+	// Previous-frame GGB hero-model origin-relative matrix, for its TAA motion vector.
+	private bridgeModelMatrixPrev: Mat4 = null;
 	public objectIdBuffer: Uint32Array = new Uint32Array(1);
 	public objectIdX = 0;
 	public objectIdY = 0;
@@ -163,6 +170,7 @@ export default class GBufferPass extends Pass<{
 			<AbstractTexture2DArray>this.manager.texturePool.get('aircraft');
 
 		this.carMaterial = new CarMaterialContainer(this.renderer).material;
+		this.deckMaterial = new DeckMaterialContainer(this.renderer).material;
 	}
 
 	private updateMaterialsDefines(): void {
@@ -639,6 +647,124 @@ export default class GBufferPass extends Pass<{
 		}
 	}
 
+	// Strata Lane B Increment 3 — draw the VISIBLE bridge deck. The DeckRibbon's mesh is baked in
+	// world coords relative to its anchor; here we finish the precision pivot exactly like the car:
+	// modelMatrix translates by the instances origin and deckMatrix translates by (anchor - origin),
+	// both kept small / in double precision so the deck doesn't jitter. Reuses the Car material (a
+	// plain per-vertex-color GBuffer material).
+	private renderDeck(instancesOrigin: Vec2): void {
+		// Draw the deck whenever a corridor exists, in every mode — GGB shows its elevated deck on
+		// load and while driving alike (one fully-rendered view). The tile pipeline suppresses the
+		// flat draped roadway for decked bridge ways, so there is no phantom road beneath it.
+		// courseMode/L still gates only the builder panel and the car's deck-height physics.
+		if (bridgeRegistry.corridors.length === 0) {
+			return;
+		}
+
+		const deck = this.manager.sceneSystem.objects.deckRibbon;
+
+		// (Re)build the ribbon against the real terrain when the registry changed or tiles under the
+		// ramps just loaded, so the drawn deck blends to the ground exactly like the car's query.
+		if (deck.needsRebuild()) {
+			const terrainHeightProvider = this.manager.systemManager.getSystem(TerrainSystem).terrainHeightProvider;
+			deck.rebuild(this.renderer, (x, z) => terrainHeightProvider.getHeightGlobalInterpolated(x, z, true));
+		}
+
+		if (!deck.mesh) {
+			return;
+		}
+
+		const camera = this.manager.sceneSystem.objects.camera;
+
+		// Origin-relative translate: the mesh holds (vertex - anchor); this puts it back at (vertex -
+		// origin) so modelMatrix's +origin translation lands it at the true world position.
+		let deckMatrix = Mat4.identity();
+		deckMatrix = Mat4.translate(
+			deckMatrix,
+			deck.anchor[0] - instancesOrigin.x,
+			0,
+			deck.anchor[1] - instancesOrigin.y
+		);
+
+		deck.position.set(instancesOrigin.x, 0, instancesOrigin.y);
+		deck.updateMatrix();
+		deck.updateMatrixWorld();
+
+		const material = this.deckMaterial;
+		const mvMatrixPrev = Mat4.multiply(this.cameraMatrixWorldInversePrev, deck.matrixWorld);
+		const prev = this.deckMatrixPrev ?? deckMatrix;
+
+		this.renderer.useMaterial(material);
+
+		material.getUniform('projectionMatrix', 'MainBlock').value = new Float32Array(camera.jitteredProjectionMatrix.values);
+		material.getUniform('modelMatrix', 'MainBlock').value = new Float32Array(deck.matrixWorld.values);
+		material.getUniform('viewMatrix', 'MainBlock').value = new Float32Array(camera.matrixWorldInverse.values);
+		material.getUniform('modelViewMatrixPrev', 'MainBlock').value = new Float32Array(mvMatrixPrev.values);
+		material.getUniform('carMatrix', 'MainBlock').value = new Float32Array(deckMatrix.values);
+		material.getUniform('carMatrixPrev', 'MainBlock').value = new Float32Array(prev.values);
+		material.updateUniformBlock('MainBlock');
+
+		deck.mesh.draw();
+
+		this.deckMatrixPrev = deckMatrix;
+	}
+
+	// Strata Lane B Increment 9 — the GGB hero model. A decoupled VISUAL prop placed over the drivable
+	// deck from the corridor's model* tunables (panel sliders). Origin-relative precision pivot like the
+	// deck/car: the mesh is centered on its own bbox, the carMatrix uniform carries
+	// translate(anchor - origin + offset) * yaw * scale, modelMatrix re-adds the origin. Reuses the car
+	// vertex-colour material (the model is fully baseColorFactor-coloured). Best-effort; never gates drive.
+	private renderBridgeModel(instancesOrigin: Vec2): void {
+		const corridor = bridgeRegistry.corridors[0];
+		if (!corridor || !corridor.modelEnabled || !corridor.modelAnchor) {
+			return;
+		}
+
+		const model = this.manager.sceneSystem.objects.bridgeModel;
+		if (!model.mesh) {
+			return;
+		}
+
+		const camera = this.manager.sceneSystem.objects.camera;
+		const scale = corridor.modelScale ?? 1;
+		const stretch = corridor.modelStretch ?? 1;
+		const yaw = corridor.modelYaw ?? 0;
+		const [ax, az] = corridor.modelAnchor;
+
+		// translate(anchor - origin + offset) * yaw * scale, applied to the origin-centered mesh.
+		let bridgeMatrix = Mat4.identity();
+		bridgeMatrix = Mat4.translate(
+			bridgeMatrix,
+			ax - instancesOrigin.x + (corridor.modelOffsetX ?? 0),
+			corridor.modelOffsetY ?? 0,
+			az - instancesOrigin.y + (corridor.modelOffsetZ ?? 0)
+		);
+		bridgeMatrix = Mat4.yRotate(bridgeMatrix, yaw);
+		bridgeMatrix = Mat4.scale(bridgeMatrix, scale * stretch, scale, scale);
+
+		model.position.set(instancesOrigin.x, 0, instancesOrigin.y);
+		model.updateMatrix();
+		model.updateMatrixWorld();
+
+		const material = this.carMaterial;
+		const mvMatrixPrev = Mat4.multiply(this.cameraMatrixWorldInversePrev, model.matrixWorld);
+		const prev = this.bridgeModelMatrixPrev ?? bridgeMatrix;
+
+		this.renderer.useMaterial(material);
+
+		material.getUniform('projectionMatrix', 'MainBlock').value = new Float32Array(camera.jitteredProjectionMatrix.values);
+		material.getUniform('modelMatrix', 'MainBlock').value = new Float32Array(model.matrixWorld.values);
+		material.getUniform('viewMatrix', 'MainBlock').value = new Float32Array(camera.matrixWorldInverse.values);
+		material.getUniform('modelViewMatrixPrev', 'MainBlock').value = new Float32Array(mvMatrixPrev.values);
+		material.getUniform('carMatrix', 'MainBlock').value = new Float32Array(bridgeMatrix.values);
+		material.getUniform('carMatrixPrev', 'MainBlock').value = new Float32Array(prev.values);
+		material.updateUniformBlock('MainBlock');
+
+		model.mesh.draw();
+
+		this.bridgeModelMatrixPrev = bridgeMatrix;
+	}
+
 	private writeToObjectIdBuffer(): void {
 		const mainRenderPass = this.getPhysicalResource('GBufferRenderPass');
 		mainRenderPass.readColorAttachmentPixel(4, this.objectIdBuffer, this.objectIdX, this.objectIdY);
@@ -681,6 +807,8 @@ export default class GBufferPass extends Pass<{
 		this.renderProjectedMeshes();
 		this.renderHuggingMeshes();
 		this.renderInstances(instancesOrigin);
+		this.renderDeck(instancesOrigin);
+		this.renderBridgeModel(instancesOrigin);
 		this.renderCar(instancesOrigin);
 		this.writeToObjectIdBuffer();
 

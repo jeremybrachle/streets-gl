@@ -23,6 +23,8 @@ import Camera from "~/lib/core/Camera";
 import Utils from "~/app/Utils";
 import {AircraftPartType} from "~/app/vehicles/aircraft/Aircraft";
 import Car from "~/app/objects/Car";
+import DeckRibbon from "~/app/objects/DeckRibbon";
+import BridgeModelObject from "~/app/objects/BridgeModelObject";
 
 interface SceneObjects {
 	wrapper: Object3D;
@@ -37,6 +39,12 @@ interface SceneObjects {
 	// Strata Phase 2 Increment 3 — throwaway placeholder car (procedural box-car mesh with a
 	// full transform matrix, drawn by GBufferPass.renderCar with its own GBuffer material).
 	car: Car;
+	// Strata Lane B Increment 3 — the VISIBLE bridge deck ribbon (drawn by GBufferPass.renderDeck,
+	// gated by courseMode; rebuilds from the live bridgeRegistry when a slider changes it).
+	deckRibbon: DeckRibbon;
+	// Strata Lane B Increment 9 — the GGB hero MODEL (CC-BY GLB; drawn by GBufferPass.renderBridgeModel
+	// over the deck as a decoupled visual prop).
+	bridgeModel: BridgeModelObject;
 }
 
 export default class SceneSystem extends System {
@@ -74,6 +82,8 @@ export default class SceneSystem extends System {
 		const labels = new Labels();
 		const terrain = new Terrain();
 		const car = new Car();
+		const deckRibbon = new DeckRibbon();
+		const bridgeModel = new BridgeModelObject();
 
 		this.objects = {
 			wrapper,
@@ -85,7 +95,9 @@ export default class SceneSystem extends System {
 			terrain,
 			instancedObjects: new Map(),
 			instancedAircraftParts: new Map(),
-			car
+			car,
+			deckRibbon,
+			bridgeModel
 		};
 
 		/*this.objects.instancedAircraftParts.set(
@@ -145,7 +157,7 @@ export default class SceneSystem extends System {
 
 		this.scene.add(wrapper);
 		wrapper.add(
-			camera, csm, skybox, tiles, labels, terrain, car,
+			camera, csm, skybox, tiles, labels, terrain, car, deckRibbon, bridgeModel,
 			...this.objects.instancedObjects.values(),
 			...this.objects.instancedAircraftParts.values()
 		);

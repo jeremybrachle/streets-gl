@@ -14,6 +14,7 @@ import Road from "~/lib/road-graph/Road";
 import Intersection, {IntersectionDirection} from "~/lib/road-graph/Intersection";
 import {VectorAreaDescriptor, VectorPolylineDescriptor} from "~/lib/tile-processing/vector/qualifiers/descriptors";
 import {ProjectedTextures} from "~/lib/tile-processing/tile3d/textures";
+import {isDeckedBridgeWay} from "~/lib/tile-processing/tile3d/handlers/deckedBridges";
 
 export default class VectorPolylineHandler implements Handler {
 	private readonly osmReference: OSMReference;
@@ -93,6 +94,14 @@ export default class VectorPolylineHandler implements Handler {
 
 	private handlePath(): Tile3DFeature[] {
 		const features: Tile3DFeature[] = [];
+
+		// A bridge we draw our own elevated deck for: skip the flat draped roadway so it doesn't show
+		// as a phantom road beneath the deck. The road stays in the RoadGraph (registered in
+		// setRoadGraph) so approach roads still trim/connect to it.
+		if (isDeckedBridgeWay(this.osmReference)) {
+			return features;
+		}
+
 		const side = VectorPolylineHandler.getRoadSideFromDescriptor(this.descriptor.side);
 		const params = VectorPolylineHandler.getPathParams(
 			this.descriptor.pathType,

@@ -5,6 +5,8 @@ import {ControlsState} from "../systems/ControlsSystem";
 import PerspectiveCamera from "~/lib/core/PerspectiveCamera";
 import TerrainHeightProvider from "~/app/terrain/TerrainHeightProvider";
 import {CarWheelOffsetX, CarWheelOffsetZ, WheelRadius} from "~/app/objects/models/CarModel";
+import {bridgeRegistry} from "~/app/bridge/BridgeRegistry";
+import {selectSupport, stepFall} from "~/app/bridge/DriveVertical";
 
 // Strata Phase 2, Step 1 — THROWAWAY PROTOTYPE GLUE.
 // A logical arcade car pose (x, z, heading, speed) driven with WASD that rides the
@@ -60,6 +62,14 @@ const AccelSmoothing = 8;       // 1/s low-pass on the measured accelerations (k
 const MaxBodyHeave = 0.05;      // m the sprung body may travel vertically off the wheels (suspension travel)
 const MaxBodyTiltDev = MathUtils.toRad(5); // max the body may pitch/roll away from the wheel plane
 const BoostLeanBack = MathUtils.toRad(2.5); // extra nose-up the body holds while boosting (shows the speed)
+
+// Vertical dynamics / gravity (drive off the deck → FALL to the ground → drive under the bridge →
+// loop back to a ramp end to get back on). Always on: off a bridge corridor the support surface IS
+// the DEM, so the car is always grounded and gravity never triggers (open-world feel untouched).
+// The pure math lives in src/app/bridge/DriveVertical.ts (selectSupport + stepFall).
+const Gravity = 55;          // world-height units / s^2 — a fall from deck height (~73) lands in ~1.6s. Tune for feel.
+const DeckAttachBand = 2.0;  // how near (units) the car must be to the deck to climb ON from the ground; small so you only attach at the ramp ends (deck ≈ ground), never under the high span
+const DeckDetachDrop = 1.5;  // how far the car may drop below the deck before it detaches (drives off the edge) — hysteresis vs suspension bumps
 
 // Chase camera — defaults plus mouse-adjustable range.
 const DefaultCameraDistance = 17; // m behind the car
@@ -148,6 +158,11 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 	private yTerrain: number = 0;
 	private pitchTerrain: number = 0;
 	private rollTerrain: number = 0;
+
+	// Vertical dynamics (gravity / drive-under). vy = vertical velocity (units/s, negative = falling);
+	// onDeck = attached to the elevated bridge deck this frame (hysteresis state for selectSupport).
+	private vy: number = 0;
+	private onDeck: boolean = false;
 	private bodyY: number = 0;
 	private bodyYVel: number = 0;
 	private bodyPitchVel: number = 0;
@@ -215,6 +230,8 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 		this.z = z;
 		this.heading = heading;
 		this.speed = 0;
+		this.vy = 0;
+		this.onDeck = false;
 		this.sampleGroundHeight();
 
 		// Settle the suspension at the spawn pose so there's no spring bounce on entry.
@@ -225,6 +242,22 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 		this.smoothedLongAccel = this.smoothedLatAccel = 0;
 		this.prevSpeed = this.speed;
 		this.prevHeading = this.heading;
+	}
+
+	// Recovery (KeyR): re-plant the car upright on the surface directly beneath it. selectSupport
+	// decides deck-vs-ground from the car's CURRENT height, so a reset after falling under the bridge
+	// lands on the ground (not snapped up to the deck), and a reset while on the deck stays on the
+	// deck. Kills vertical + forward velocity and settles the suspension so there's no bounce.
+	private recoverToGround(): void {
+		this.vy = 0;
+		this.speed = 0;
+		this.sampleGroundHeight();
+		this.y = this.bodyY = this.yTerrain;
+		this.pitch = this.bodyPitch = this.pitchTerrain;
+		this.roll = this.bodyRoll = this.rollTerrain;
+		this.bodyYVel = this.bodyPitchVel = this.bodyRollVel = 0;
+		this.smoothedLongAccel = this.smoothedLatAccel = 0;
+		this.prevSpeed = this.speed;
 	}
 
 	public getCarPose(): {
@@ -271,6 +304,22 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 		const cosH = Math.cos(this.heading);
 		const sinH = Math.sin(this.heading);
 
+		// Decide ONCE, at the car center, whether the car rides the elevated bridge deck or the ground
+		// beneath it — with height-proximity + hysteresis (selectSupport). On the deck only when the car
+		// is actually ON it (driven up a ramp end where deck ≈ ground); down on the DEM far below the
+		// span it drives UNDER the bridge. Deciding per-frame for the whole car (not per wheel) keeps the
+		// 4-wheel tilt plane on a single coherent surface. courseMode still gates whether a deck exists
+		// at all for now (the flat-road default); gravity itself is always on.
+		const demCenter = this.terrainHeightProvider.getHeightGlobalInterpolated(this.x, this.z, true);
+		if (demCenter !== null) {
+			const deckCenter = bridgeRegistry.courseMode ? bridgeRegistry.query(this.x, this.z, demCenter) : null;
+			this.onDeck = selectSupport(this.y, deckCenter, demCenter, this.onDeck, {
+				attachBand: DeckAttachBand, detachDrop: DeckDetachDrop
+			}).onDeck;
+		} else {
+			this.onDeck = false;
+		}
+
 		// Local wheel offsets (nose = +X, lateral = +Z) rotated into world by heading. The
 		// lateral basis matches MathUtils.polarToCartesian(heading + PI/2) = (-sin, *, cos).
 		const sample = (localX: number, localZ: number): number | null => {
@@ -278,7 +327,21 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 			const wz = this.z + sinH * localX + cosH * localZ;
 
 			// Returns 0 while terrain fallback is on, null for not-yet-loaded tiles.
-			return this.terrainHeightProvider.getHeightGlobalInterpolated(wx, wz, true);
+			const dem = this.terrainHeightProvider.getHeightGlobalInterpolated(wx, wz, true);
+			if (dem === null) {
+				return null;
+			}
+
+			// Ride the deck only when attached this frame (decided at center, above). Detached — open
+			// world, or driving under the bridge — it's the DEM exactly as before.
+			if (this.onDeck && bridgeRegistry.courseMode) {
+				const deck = bridgeRegistry.query(wx, wz, dem);
+				if (deck !== null) {
+					return deck;
+				}
+			}
+
+			return dem;
 		};
 
 		const fl = sample(CarWheelOffsetX, CarWheelOffsetZ);   // front, local +Z
@@ -384,6 +447,15 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 				// Cycle the preset chase cameras (Standard → Close → Far → …).
 				this.cameraPresetIndex = (this.cameraPresetIndex + 1) % ChaseCameraPresets.length;
 				this.applyCameraPreset(this.cameraPresetIndex);
+				break;
+			case 'KeyL':
+				// Toggle course mode ("bowling-lane bumpers"): bridge decks become drivable.
+				bridgeRegistry.courseMode = !bridgeRegistry.courseMode;
+				break;
+			case 'KeyR':
+				// Recover: re-plant the car upright on the surface beneath it (after a fall / awkward
+				// landing off the deck). Snaps the tires back to the ground.
+				this.recoverToGround();
 				break;
 		}
 	}
@@ -613,11 +685,14 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 		// Extra nose-up while boosting, so the burst of speed reads visually (eased by the spring).
 		const boostLean = (this.boostKeyPressed && this.speed > 0) ? BoostLeanBack : 0;
 
-		// Wheels ride the terrain pose exactly (always planted on the ground). The sprung body
-		// chases the terrain pose PLUS the weight-transfer/boost lean through a damped spring, so
-		// jagged terrain becomes a smooth bounce and the body travels a little relative to the
-		// wheels (= the visible suspension). This is the ATV sprung/unsprung split.
-		this.y = this.yTerrain;
+		// Vertical dynamics: gravity pulls the car toward the support surface (yTerrain). Grounded,
+		// stepFall just plants it on yTerrain (this.y === yTerrain, vy 0) so wheels ride the terrain
+		// exactly as before. When the support drops away — driving off the deck edge — the car FALLS
+		// under gravity until it catches the ground beneath. Always on; off a corridor yTerrain is the
+		// DEM and the car is always grounded, so this is a no-op for open-world driving.
+		const fall = stepFall(this.y, this.vy, this.yTerrain, Gravity, dt);
+		this.y = fall.y;
+		this.vy = fall.vy;
 		this.pitch = this.pitchTerrain;
 		this.roll = this.rollTerrain;
 
@@ -629,14 +704,17 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 			return [value + newVel * dt, newVel];
 		};
 
-		[this.bodyY, this.bodyYVel] = spring(this.bodyY, this.bodyYVel, this.yTerrain);
+		// Body chases this.y (the gravity-resolved height) not the raw support: identical on the
+		// ground (this.y === yTerrain), but in the air the body falls WITH the car instead of being
+		// yanked toward the distant ground below.
+		[this.bodyY, this.bodyYVel] = spring(this.bodyY, this.bodyYVel, this.y);
 		[this.bodyPitch, this.bodyPitchVel] =
 			spring(this.bodyPitch, this.bodyPitchVel, this.pitchTerrain + pitchWT + boostLean);
 		[this.bodyRoll, this.bodyRollVel] = spring(this.bodyRoll, this.bodyRollVel, this.rollTerrain + rollWT);
 
 		// Bound the body's travel off the wheel plane so a long climb can't let it drift far (which
 		// would clip / look like sinking). Within these bounds it's free to bounce on its springs.
-		this.bodyY = MathUtils.clamp(this.bodyY, this.yTerrain - MaxBodyHeave, this.yTerrain + MaxBodyHeave);
+		this.bodyY = MathUtils.clamp(this.bodyY, this.y - MaxBodyHeave, this.y + MaxBodyHeave);
 		this.bodyPitch = MathUtils.clamp(this.bodyPitch, this.pitchTerrain - MaxBodyTiltDev, this.pitchTerrain + MaxBodyTiltDev);
 		this.bodyRoll = MathUtils.clamp(this.bodyRoll, this.rollTerrain - MaxBodyTiltDev, this.rollTerrain + MaxBodyTiltDev);
 
