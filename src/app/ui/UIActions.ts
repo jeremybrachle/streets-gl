@@ -14,4 +14,5 @@ export default interface UIActions {
 	hideActiveBuilding: () => void;
 	undoLastHide: () => void;
 	restoreAllHidden: () => void;
+	showHidden: (packedId: number) => void;
 }

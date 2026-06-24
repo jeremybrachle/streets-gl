@@ -21,4 +21,5 @@ export default interface UISystemState {
 	driveActive: boolean;
 	driveSpeed: number;
 	hiddenBuildingsCount: number;
+	hiddenBuildingsList: number[];
 }

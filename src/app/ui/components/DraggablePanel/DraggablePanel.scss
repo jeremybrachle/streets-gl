@@ -1,0 +1,96 @@
+@import "../../styles/common.scss";
+
+.draggablePanel {
+	position: fixed;
+	pointer-events: auto;
+	display: flex;
+	flex-direction: column;
+	z-index: 20;
+
+	@extend %panel-bg;
+	@extend %panel-border;
+	border-radius: 12px;
+	overflow: hidden;
+
+	// The Bridge Builder supplies its own dark glass; the wrapper only adds the drag bar + positioning.
+	&--bare {
+		background: none;
+		border: none;
+	}
+
+	&__bar {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		padding: 4px 6px 4px 10px;
+		cursor: move;
+		user-select: none;
+		touch-action: none;
+		background: rgba(0, 0, 0, 0.25);
+	}
+
+	&__title {
+		font-size: 12px;
+		font-weight: 700;
+		letter-spacing: 0.02em;
+		text-transform: uppercase;
+		opacity: 0.8;
+	}
+
+	&__hide {
+		flex: 0 0 auto;
+		width: 22px;
+		height: 22px;
+		line-height: 1;
+		border: none;
+		border-radius: 6px;
+		font-size: 16px;
+		font-weight: 700;
+		color: #fff;
+		background-color: rgba(255, 255, 255, 0.18);
+		cursor: pointer;
+
+		&:hover {
+			background-color: rgba(255, 255, 255, 0.32);
+		}
+	}
+
+	&__body {
+		padding: 8px 10px 10px;
+	}
+
+	// Bare panels supply their own background + inner padding (the bar text stays light on the dark glass).
+	&--bare &__title {
+		color: #fff;
+	}
+
+	&--bare &__body {
+		padding: 0;
+	}
+}
+
+.launcher {
+	position: fixed;
+	pointer-events: auto;
+	z-index: 20;
+	padding: 6px 12px;
+	border: none;
+	border-radius: 100px;
+	font-size: 12px;
+	font-weight: 700;
+	color: #fff;
+	background-color: #3478f6;
+	cursor: pointer;
+
+	&:hover {
+		background-color: #4d8bff;
+	}
+}
+
+@include themify($themes) {
+	.draggablePanel {
+		color: themed('text-color');
+	}
+}

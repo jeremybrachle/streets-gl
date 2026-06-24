@@ -1,25 +1,51 @@
 @import "../../styles/common.scss";
 
+// Positioning + panel background/border now come from the DraggablePanel wrapper; this only lays out
+// the inner content.
 .hiddenBuildings {
-	position: absolute;
-	top: 70px;
-	left: 50%;
-	transform: translateX(-50%);
-	pointer-events: auto;
 	display: flex;
-	flex-direction: row;
-	align-items: center;
+	flex-direction: column;
 	gap: 8px;
-	padding: 8px 12px;
+	max-width: 320px;
 
-	@extend %panel-bg;
-	@extend %panel-border;
-	@extend %panel-border-radius;
+	&__header {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		gap: 8px;
+	}
 
 	&__label {
 		font-size: 13px;
 		font-weight: 600;
 		margin-right: 4px;
+	}
+
+	&__list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		max-height: 240px;
+		overflow-y: auto;
+	}
+
+	&__item {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	&__itemLabel {
+		font-size: 12px;
+		opacity: 0.85;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	&__button {
@@ -35,11 +61,5 @@
 		&:hover {
 			background-color: #4d8bff;
 		}
-	}
-}
-
-@include themify($themes) {
-	.hiddenBuildings {
-		color: themed('text-color');
 	}
 }

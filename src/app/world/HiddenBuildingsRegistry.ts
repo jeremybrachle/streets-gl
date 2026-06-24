@@ -37,6 +37,15 @@ export class HiddenBuildingsRegistry {
 		this.save();
 	}
 
+	/** Un-hide one specific building. Returns true if it was hidden (so callers re-show it). Persists. */
+	public remove(packedId: number): boolean {
+		if (!this.hidden.delete(packedId)) {
+			return false;
+		}
+		this.save();
+		return true;
+	}
+
 	/** Un-hide the most recently hidden building; returns its packed id, or null if none. Persists. */
 	public undoLast(): number | null {
 		if (this.hidden.size === 0) {

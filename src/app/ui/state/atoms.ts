@@ -23,6 +23,7 @@ export interface AtomsCollection {
 	driveActive: RecoilState<boolean>;
 	driveSpeed: RecoilState<number>;
 	hiddenBuildingsCount: RecoilState<number>;
+	hiddenBuildingsList: RecoilState<number[]>;
 }
 
 export const getAtoms = (
@@ -97,6 +98,11 @@ export const getAtoms = (
 		hiddenBuildingsCount: atom({
 			key: 'hiddenBuildingsCount',
 			effects: [bidirectionalSyncEffect('hiddenBuildingsCount', commonStorage)]
+		}),
+		hiddenBuildingsList: atom({
+			key: 'hiddenBuildingsList',
+			default: [],
+			effects: [bidirectionalSyncEffect('hiddenBuildingsList', commonStorage)]
 		}),
 	};
 }

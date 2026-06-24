@@ -1,6 +1,7 @@
 import React, {useEffect, useState} from "react";
 import styles from './BridgePanel.scss';
 import {bridgeRegistry} from "~/app/bridge/BridgeRegistry";
+import DraggablePanel from "~/app/ui/components/DraggablePanel";
 
 // The RollerCoaster-Tycoon builder, first pass. Edits the live bridgeRegistry singleton directly
 // (the override store the drive physics reads every frame) so dragging a slider reshapes the deck
@@ -85,8 +86,8 @@ const BridgePanel: React.FC = () => {
 	);
 
 	return (
+		<DraggablePanel prefId="bridgeBuilder" title="Bridge Builder" defaultStyle={{top: 70, left: 16}} bare>
 		<div className={styles.bridgePanel}>
-			<div className={styles['bridgePanel__title']}>Bridge Builder</div>
 			<label className={styles['bridgePanel__row']}>
 				<input
 					type="checkbox"
@@ -125,6 +126,7 @@ const BridgePanel: React.FC = () => {
 				<button type="button" onClick={onReset} onPointerUp={releaseFocus}>Reset</button>
 			</div>
 		</div>
+		</DraggablePanel>
 	);
 };
 

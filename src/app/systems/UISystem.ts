@@ -40,7 +40,8 @@ export default class UISystem extends System {
 		dataTimestamp: null,
 		driveActive: false,
 		driveSpeed: 0,
-		hiddenBuildingsCount: hiddenBuildingsRegistry.count()
+		hiddenBuildingsCount: hiddenBuildingsRegistry.count(),
+		hiddenBuildingsList: hiddenBuildingsRegistry.list()
 	};
 	private fpsUpdateTimer = 0;
 	// The currently selected map feature (mirrors the UI atom) so the "delete from view" action knows
@@ -141,6 +142,14 @@ export default class UISystem extends System {
 				this.systemManager.getSystem(TileObjectsSystem).showBuildingNow(packedId);
 				this.pushHiddenBuildingsCount();
 			},
+			// Restore one specific building from the hidden list (per-item "Show" button).
+			showHidden: (packedId: number) => {
+				if (!hiddenBuildingsRegistry.remove(packedId)) {
+					return;
+				}
+				this.systemManager.getSystem(TileObjectsSystem).showBuildingNow(packedId);
+				this.pushHiddenBuildingsCount();
+			},
 			restoreAllHidden: () => {
 				const tileObjects = this.systemManager.getSystem(TileObjectsSystem);
 				for (const packedId of hiddenBuildingsRegistry.clear()) {
@@ -156,6 +165,7 @@ export default class UISystem extends System {
 
 	private pushHiddenBuildingsCount(): void {
 		this.ui.setStateFieldValue('hiddenBuildingsCount', hiddenBuildingsRegistry.count());
+		this.ui.setStateFieldValue('hiddenBuildingsList', hiddenBuildingsRegistry.list());
 	}
 
 	public setResourcesLoadingProgress(progress: number): void {
