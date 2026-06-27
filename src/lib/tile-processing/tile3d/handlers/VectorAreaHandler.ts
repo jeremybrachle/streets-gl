@@ -28,8 +28,19 @@ import * as Simplify from "simplify-js";
 import {SurfaceBuilderOrientation} from "~/lib/tile-processing/tile3d/builders/SurfaceBuilder";
 import {cullInstancesNearRoads} from "~/lib/tile-processing/tile3d/handlers/roadProximity";
 import {isDeckedBridgeWay} from "~/lib/tile-processing/tile3d/handlers/deckedBridges";
+import {isTileAreaUnderCorridorSpan, TileVertex} from "~/app/bridge/CorridorSuppression";
 
 const TileSize = 611.4962158203125;
+
+// Strata Lane B — only these flat draped-surface area types are candidates for geometric ghost
+// suppression under a raised deck. Water / buildings / grass / parkland that legitimately sit under
+// a bridge span must survive, so they are deliberately excluded.
+const DrapedSurfaceTypes: ReadonlySet<VectorAreaDescriptor['type']> = new Set<VectorAreaDescriptor['type']>([
+	'pavement',
+	'asphalt',
+	'roadwayArea',
+	'roadwayIntersection'
+]);
 
 // Strata Lane B — scattered trees/shrubs within this many real meters of a road centerline are
 // culled, since OSM forest polygons overlap the roads that cross them. Scaled by mercatorScale to
@@ -41,6 +52,9 @@ export default class VectorAreaHandler implements Handler {
 	private readonly descriptor: VectorAreaDescriptor;
 	private readonly rings: VectorAreaRing[];
 	private mercatorScale: number = 1;
+	private xtile: number = -1;
+	private ytile: number = -1;
+	private zoom: number = -1;
 	private terrainMinHeight: number = 0;
 	private terrainMaxHeight: number = 0;
 	private multipolygon: Tile3DMultipolygon = null;
@@ -97,6 +111,28 @@ export default class VectorAreaHandler implements Handler {
 
 	public setMercatorScale(scale: number): void {
 		this.mercatorScale = scale;
+	}
+
+	public setTileCoords(x: number, y: number, zoom: number): void {
+		this.xtile = x;
+		this.ytile = y;
+		this.zoom = zoom;
+	}
+
+	// Outer-ring vertices (frame D) for the geometric corridor-suppression centroid test. Inner rings
+	// (holes) are excluded; VectorNode is structurally a TileVertex (has x, y).
+	private outerRingVertices(): TileVertex[] {
+		const vertices: TileVertex[] = [];
+
+		for (const ring of this.rings) {
+			if (ring.type !== VectorAreaRingType.Inner) {
+				for (const node of ring.nodes) {
+					vertices.push(node);
+				}
+			}
+		}
+
+		return vertices;
 	}
 
 	private getMultipolygon(): Tile3DMultipolygon {
@@ -243,23 +279,20 @@ export default class VectorAreaHandler implements Handler {
 	}
 
 	public getFeatures(): Tile3DFeature[] {
-		// [STRATA-DBG] PHASE 1 DIAGNOSTIC — remove after confirming the ghost source. Logs whether the
-		// Bay Bridge man_made=bridge area polygons reach THIS handler, what descriptor.type they carry,
-		// and whether they get suppressed here.
-		const STRATA_DBG_WATCH = new Set<number>([1011568818, 1011568819, 1093564639, 1474571829]);
-		if (this.osmReference && STRATA_DBG_WATCH.has(this.osmReference.id)) {
-			// eslint-disable-next-line no-console
-			console.log('[STRATA-DBG] VectorAreaHandler', {
-				id: this.osmReference.id,
-				osmType: this.osmReference.type,
-				descriptorType: this.descriptor.type,
-				suppressed: isDeckedBridgeWay(this.osmReference)
-			});
-		}
-
 		// The man_made=bridge footprint polygon (rendered as flat grey pavement) for a bridge we draw
 		// our own deck over: skip it so it doesn't show as a phantom flat surface under the deck.
 		if (isDeckedBridgeWay(this.osmReference)) {
+			return [];
+		}
+
+		// Generic geometric ghost suppression (no per-way id list), gated to flat draped-surface types
+		// so water / buildings / grass under a bridge span survive. The man_made=bridge pavement
+		// footprint is the actual Bay/GGB ghost; its centroid sits under the elevated span.
+		if (
+			this.zoom >= 0 &&
+			DrapedSurfaceTypes.has(this.descriptor.type) &&
+			isTileAreaUnderCorridorSpan(this.outerRingVertices(), this.xtile, this.ytile, this.zoom)
+		) {
 			return [];
 		}
 

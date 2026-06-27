@@ -15,12 +15,16 @@ import Intersection, {IntersectionDirection} from "~/lib/road-graph/Intersection
 import {VectorAreaDescriptor, VectorPolylineDescriptor} from "~/lib/tile-processing/vector/qualifiers/descriptors";
 import {ProjectedTextures} from "~/lib/tile-processing/tile3d/textures";
 import {isDeckedBridgeWay} from "~/lib/tile-processing/tile3d/handlers/deckedBridges";
+import {isTilePathUnderCorridorSpan} from "~/app/bridge/CorridorSuppression";
 
 export default class VectorPolylineHandler implements Handler {
 	private readonly osmReference: OSMReference;
 	private readonly descriptor: VectorPolylineDescriptor;
 	private readonly vertices: Vec2[];
 	private mercatorScale: number = 1;
+	private xtile: number = -1;
+	private ytile: number = -1;
+	private zoom: number = -1;
 	private graph: RoadGraph = null;
 	private graphRoad: Road = null;
 	private graphGroup: number = -1;
@@ -37,6 +41,12 @@ export default class VectorPolylineHandler implements Handler {
 
 	public setMercatorScale(scale: number): void {
 		this.mercatorScale = scale;
+	}
+
+	public setTileCoords(x: number, y: number, zoom: number): void {
+		this.xtile = x;
+		this.ytile = y;
+		this.zoom = zoom;
 	}
 
 	public getFeatures(): Tile3DFeature[] {
@@ -95,24 +105,18 @@ export default class VectorPolylineHandler implements Handler {
 	private handlePath(): Tile3DFeature[] {
 		const features: Tile3DFeature[] = [];
 
-		// [STRATA-DBG] TEMPORARY — remove after the Bay Bridge flat-road investigation (s16).
-		// Logs whether the two Bay West-span carriageways (8921938, 661905446) and the GGB east
-		// carriageway (537838948, control) actually reach handlePath and get suppressed here.
-		const STRATA_DBG_WATCH = new Set<number>([8921938, 661905446, 537838948]);
-		if (this.osmReference && STRATA_DBG_WATCH.has(this.osmReference.id)) {
-			// eslint-disable-next-line no-console
-			console.log('[STRATA-DBG] handlePath', {
-				id: this.osmReference.id,
-				osmType: this.osmReference.type,
-				pathType: this.descriptor.pathType,
-				suppressed: isDeckedBridgeWay(this.osmReference)
-			});
-		}
-
 		// A bridge we draw our own elevated deck for: skip the flat draped roadway so it doesn't show
 		// as a phantom road beneath the deck. The road stays in the RoadGraph (registered in
 		// setRoadGraph) so approach roads still trim/connect to it.
 		if (isDeckedBridgeWay(this.osmReference)) {
+			return features;
+		}
+
+		// Generic geometric ghost suppression (no per-way id list): a flat draped road whose geometry
+		// runs under one of our raised bridge decks shows as a phantom road beneath it. Suppress paths
+		// that lie under a corridor's elevated span (majority of vertices). The road still stays in the
+		// RoadGraph for trimming, since this only skips the drawn geometry below.
+		if (this.zoom >= 0 && isTilePathUnderCorridorSpan(this.vertices, this.xtile, this.ytile, this.zoom)) {
 			return features;
 		}
 

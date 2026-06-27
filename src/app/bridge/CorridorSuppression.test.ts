@@ -1,6 +1,10 @@
 import MathUtils from "~/lib/math/MathUtils";
 import {
 	tileLocalToWorldMercator,
+	tileVerticesToWorldMercator,
+	fractionUnderAnyCorridorSpan,
+	isTilePathUnderCorridorSpan,
+	isTileAreaUnderCorridorSpan,
 	isUnderElevatedSpan,
 	isUnderAnyCorridorSpan,
 } from "./CorridorSuppression";
@@ -146,5 +150,137 @@ describe("isUnderAnyCorridorSpan", () => {
 
 	it("is FALSE far from every corridor", () => {
 		expect(isUnderAnyCorridorSpan(0, 0)).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Handler-facing layer. These take frame-D vertices (what a worker handler holds) + a SINGLE tile
+// index. Frame D is linear, so a point physically in a neighbouring tile is still exactly recoverable
+// when expressed in another tile's local frame (it just falls outside [0,T]) — see the cross-boundary
+// test above. tileLocalForTile() exploits that to build all of a feature's vertices against one tile.
+
+const ZOOM_HF = ZOOM;
+
+/** Express a lat/lon as a frame-D vertex (hx, hy) relative to an arbitrary chosen tile. */
+function tileLocalForTile(lat: number, lon: number, xtile: number, ytile: number): {x: number; y: number} {
+	const scale = Math.pow(2, ZOOM_HF);
+	const tileF = MathUtils.degrees2tile(lat, lon, ZOOM_HF);
+	const u = tileF.x / scale;
+	const v = tileF.y / scale;
+	const T = WORLD_SIZE / scale;
+	const gx = u * WORLD_SIZE;
+	const gy = v * WORLD_SIZE;
+	const localX = gx - T * xtile;
+	const localY = gy - T * ytile;
+	return {x: T - localY, y: localX};
+}
+
+/** The reference tile we build handler-facing fixtures in: the tile containing the Bay span midpoint. */
+const REF_TILE = (() => {
+	const t = MathUtils.degrees2tile(37.79714, -122.37901, ZOOM_HF);
+	return {xtile: Math.floor(t.x), ytile: Math.floor(t.y)};
+})();
+
+// Bay elevated-span endpoints (from BayBridge.ts) and a downtown (off-bridge) reference.
+const BAY_SF: [number, number] = [37.78620, -122.39073];
+const BAY_YBI: [number, number] = [37.80808, -122.36729];
+const DOWNTOWN: [number, number] = [37.79468, -122.39438];
+
+const baySpanLatLon = (t: number): [number, number] =>
+	[BAY_SF[0] + (BAY_YBI[0] - BAY_SF[0]) * t, BAY_SF[1] + (BAY_YBI[1] - BAY_SF[1]) * t];
+
+describe("tileVerticesToWorldMercator", () => {
+	it("maps each frame-D vertex back to its degrees2meters world point", () => {
+		const latLons: [number, number][] = [baySpanLatLon(0.4), baySpanLatLon(0.6), DOWNTOWN];
+		const verts = latLons.map(([la, lo]) => tileLocalForTile(la, lo, REF_TILE.xtile, REF_TILE.ytile));
+
+		const out = tileVerticesToWorldMercator(verts, REF_TILE.xtile, REF_TILE.ytile, ZOOM_HF);
+
+		for (let i = 0; i < latLons.length; i++) {
+			const [ex, ez] = d2m(latLons[i][0], latLons[i][1]);
+			expect(out[i][0]).toBeCloseTo(ex, 2);
+			expect(out[i][1]).toBeCloseTo(ez, 2);
+		}
+	});
+});
+
+describe("fractionUnderAnyCorridorSpan", () => {
+	it("is 1 when every vertex is under the span", () => {
+		const verts = [0.3, 0.5, 0.7].map(t => {
+			const [la, lo] = baySpanLatLon(t);
+			return tileLocalForTile(la, lo, REF_TILE.xtile, REF_TILE.ytile);
+		});
+
+		expect(fractionUnderAnyCorridorSpan(verts, REF_TILE.xtile, REF_TILE.ytile, ZOOM_HF)).toBeCloseTo(1, 5);
+	});
+
+	it("is 0 for an all-downtown polyline", () => {
+		const verts = [DOWNTOWN, DOWNTOWN, DOWNTOWN].map(([la, lo]) =>
+			tileLocalForTile(la, lo, REF_TILE.xtile, REF_TILE.ytile));
+
+		expect(fractionUnderAnyCorridorSpan(verts, REF_TILE.xtile, REF_TILE.ytile, ZOOM_HF)).toBe(0);
+	});
+
+	it("is 0 for an empty vertex list", () => {
+		expect(fractionUnderAnyCorridorSpan([], REF_TILE.xtile, REF_TILE.ytile, ZOOM_HF)).toBe(0);
+	});
+});
+
+describe("isTilePathUnderCorridorSpan (majority rule)", () => {
+	it("is TRUE for a path running along the elevated span", () => {
+		const verts = [0.35, 0.45, 0.55, 0.65].map(t => {
+			const [la, lo] = baySpanLatLon(t);
+			return tileLocalForTile(la, lo, REF_TILE.xtile, REF_TILE.ytile);
+		});
+
+		expect(isTilePathUnderCorridorSpan(verts, REF_TILE.xtile, REF_TILE.ytile, ZOOM_HF)).toBe(true);
+	});
+
+	it("is FALSE for an approach road that only clips the span at one end (minority under)", () => {
+		// One span vertex + three downtown vertices => 25% under => below the 0.5 majority.
+		const verts = [
+			tileLocalForTile(...baySpanLatLon(0.5), REF_TILE.xtile, REF_TILE.ytile),
+			tileLocalForTile(DOWNTOWN[0], DOWNTOWN[1], REF_TILE.xtile, REF_TILE.ytile),
+			tileLocalForTile(DOWNTOWN[0], DOWNTOWN[1], REF_TILE.xtile, REF_TILE.ytile),
+			tileLocalForTile(DOWNTOWN[0], DOWNTOWN[1], REF_TILE.xtile, REF_TILE.ytile),
+		];
+
+		expect(isTilePathUnderCorridorSpan(verts, REF_TILE.xtile, REF_TILE.ytile, ZOOM_HF)).toBe(false);
+	});
+
+	it("is FALSE for a single-vertex degenerate path", () => {
+		const v = tileLocalForTile(...baySpanLatLon(0.5), REF_TILE.xtile, REF_TILE.ytile);
+		expect(isTilePathUnderCorridorSpan([v], REF_TILE.xtile, REF_TILE.ytile, ZOOM_HF)).toBe(false);
+	});
+});
+
+describe("isTileAreaUnderCorridorSpan (centroid rule)", () => {
+	it("is TRUE for a small footprint centred on the span", () => {
+		const [la, lo] = baySpanLatLon(0.5);
+		const d = 0.0003; // ~30 m box around the span midpoint
+		const ring = [
+			tileLocalForTile(la + d, lo + d, REF_TILE.xtile, REF_TILE.ytile),
+			tileLocalForTile(la + d, lo - d, REF_TILE.xtile, REF_TILE.ytile),
+			tileLocalForTile(la - d, lo - d, REF_TILE.xtile, REF_TILE.ytile),
+			tileLocalForTile(la - d, lo + d, REF_TILE.xtile, REF_TILE.ytile),
+		];
+
+		expect(isTileAreaUnderCorridorSpan(ring, REF_TILE.xtile, REF_TILE.ytile, ZOOM_HF)).toBe(true);
+	});
+
+	it("is FALSE for a polygon whose centroid is downtown even if a corner clips the span", () => {
+		const [sx, sz] = baySpanLatLon(0.5);
+		const ring = [
+			tileLocalForTile(sx, sz, REF_TILE.xtile, REF_TILE.ytile),      // one corner on the span
+			tileLocalForTile(DOWNTOWN[0], DOWNTOWN[1], REF_TILE.xtile, REF_TILE.ytile),
+			tileLocalForTile(DOWNTOWN[0], DOWNTOWN[1] - 0.001, REF_TILE.xtile, REF_TILE.ytile),
+			tileLocalForTile(DOWNTOWN[0] - 0.001, DOWNTOWN[1], REF_TILE.xtile, REF_TILE.ytile),
+		];
+
+		expect(isTileAreaUnderCorridorSpan(ring, REF_TILE.xtile, REF_TILE.ytile, ZOOM_HF)).toBe(false);
+	});
+
+	it("is FALSE for an empty ring", () => {
+		expect(isTileAreaUnderCorridorSpan([], REF_TILE.xtile, REF_TILE.ytile, ZOOM_HF)).toBe(false);
 	});
 });

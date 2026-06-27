@@ -122,3 +122,97 @@ export function isUnderAnyCorridorSpan(
 	}
 	return false;
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Handler-facing layer: the tile worker holds geometry in frame D (flipped tile-local meters) and
+// knows its tile index (xtile, ytile, zoom) — see Tile3DFromVectorProvider.setTileCoords. These
+// functions convert a feature's D vertices to frame E and decide whether the whole feature should be
+// suppressed. Structural TileVertex so both Vec2 and VectorNode satisfy it without importing either.
+
+export interface TileVertex {
+	readonly x: number;
+	readonly y: number;
+}
+
+/** Convert an array of frame-D tile vertices to frame-E [X=north, Z=east] world points. */
+export function tileVerticesToWorldMercator(
+	vertices: readonly TileVertex[],
+	xtile: number,
+	ytile: number,
+	zoom: number
+): [number, number][] {
+	return vertices.map(v => tileLocalToWorldMercator(v.x, v.y, xtile, ytile, zoom));
+}
+
+/** Fraction (0..1) of the given frame-D vertices that lie under any corridor's elevated span. */
+export function fractionUnderAnyCorridorSpan(
+	vertices: readonly TileVertex[],
+	xtile: number,
+	ytile: number,
+	zoom: number,
+	corridors: readonly BridgeCorridor[] = SUPPRESSION_CORRIDORS
+): number {
+	if (vertices.length === 0) {
+		return 0;
+	}
+
+	let under = 0;
+
+	for (const v of vertices) {
+		const [x, z] = tileLocalToWorldMercator(v.x, v.y, xtile, ytile, zoom);
+
+		if (isUnderAnyCorridorSpan(x, z, corridors)) {
+			under++;
+		}
+	}
+
+	return under / vertices.length;
+}
+
+/**
+ * Majority rule for a polyline (draped road): suppress when at least half its vertices lie under a
+ * corridor's elevated span. A long approach road that only clips the span at one end keeps most of
+ * its length on the ground, so it stays below 0.5 and survives. Needs ≥2 vertices to be a path.
+ */
+export function isTilePathUnderCorridorSpan(
+	vertices: readonly TileVertex[],
+	xtile: number,
+	ytile: number,
+	zoom: number,
+	corridors: readonly BridgeCorridor[] = SUPPRESSION_CORRIDORS
+): boolean {
+	if (vertices.length < 2) {
+		return false;
+	}
+
+	return fractionUnderAnyCorridorSpan(vertices, xtile, ytile, zoom, corridors) >= 0.5;
+}
+
+/**
+ * Centroid rule for an area (draped surface polygon): suppress when the polygon's vertex centroid
+ * lies under a corridor's elevated span. The bridge pavement footprint is compact, so its centroid
+ * is a robust single-point test; a large polygon (water, parkland) that only overlaps the span at
+ * an edge keeps its centroid outside and survives. Caller passes the OUTER ring vertices only.
+ */
+export function isTileAreaUnderCorridorSpan(
+	ringVertices: readonly TileVertex[],
+	xtile: number,
+	ytile: number,
+	zoom: number,
+	corridors: readonly BridgeCorridor[] = SUPPRESSION_CORRIDORS
+): boolean {
+	if (ringVertices.length === 0) {
+		return false;
+	}
+
+	let sx = 0, sy = 0;
+
+	for (const v of ringVertices) {
+		sx += v.x;
+		sy += v.y;
+	}
+
+	const [x, z] = tileLocalToWorldMercator(sx / ringVertices.length, sy / ringVertices.length, xtile, ytile, zoom);
+
+	return isUnderAnyCorridorSpan(x, z, corridors);
+}

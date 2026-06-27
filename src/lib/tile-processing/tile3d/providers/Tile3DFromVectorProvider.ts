@@ -62,6 +62,8 @@ export default class Tile3DFromVectorProvider implements FeatureProvider<Tile3DF
 		Tile3DFromVectorProvider.updateFeaturesMercatorScale(handlers, x, y, zoom);
 		await Tile3DFromVectorProvider.updateFeaturesHeight(handlers, this.params.heightPromise);
 		Tile3DFromVectorProvider.addRoadGraphToHandlers(handlers);
+		// After the road-graph pass so the intersection-polygon handlers it appends are covered too.
+		Tile3DFromVectorProvider.updateFeaturesTileCoords(handlers, x, y, zoom);
 
 		const collection = Tile3DFromVectorProvider.getCollectionFromHandlers(x, y, zoom, handlers);
 
@@ -334,6 +336,12 @@ export default class Tile3DFromVectorProvider implements FeatureProvider<Tile3DF
 
 		for (const feature of features) {
 			feature.setMercatorScale(scale);
+		}
+	}
+
+	private static updateFeaturesTileCoords(features: Handler[], x: number, y: number, zoom: number): void {
+		for (const feature of features) {
+			feature.setTileCoords?.(x, y, zoom);
 		}
 	}
 
