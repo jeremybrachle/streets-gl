@@ -243,6 +243,20 @@ export default class VectorAreaHandler implements Handler {
 	}
 
 	public getFeatures(): Tile3DFeature[] {
+		// [STRATA-DBG] PHASE 1 DIAGNOSTIC — remove after confirming the ghost source. Logs whether the
+		// Bay Bridge man_made=bridge area polygons reach THIS handler, what descriptor.type they carry,
+		// and whether they get suppressed here.
+		const STRATA_DBG_WATCH = new Set<number>([1011568818, 1011568819, 1093564639, 1474571829]);
+		if (this.osmReference && STRATA_DBG_WATCH.has(this.osmReference.id)) {
+			// eslint-disable-next-line no-console
+			console.log('[STRATA-DBG] VectorAreaHandler', {
+				id: this.osmReference.id,
+				osmType: this.osmReference.type,
+				descriptorType: this.descriptor.type,
+				suppressed: isDeckedBridgeWay(this.osmReference)
+			});
+		}
+
 		// The man_made=bridge footprint polygon (rendered as flat grey pavement) for a bridge we draw
 		// our own deck over: skip it so it doesn't show as a phantom flat surface under the deck.
 		if (isDeckedBridgeWay(this.osmReference)) {

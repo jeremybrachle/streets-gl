@@ -39,6 +39,28 @@
 		font-variant-numeric: tabular-nums;
 	}
 
+	// Exact-entry box beside each slider. Tabular figures + right-aligned so it reads like the old
+	// value readout, but editable. Keep it narrow so the row layout doesn't shift.
+	&__num {
+		flex: 0 0 58px;
+		width: 58px;
+		min-width: 0;
+		padding: 2px 4px;
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+		font-size: 12px;
+		color: #fff;
+		background: rgba(255, 255, 255, 0.10);
+		border: 1px solid rgba(255, 255, 255, 0.22);
+		border-radius: 4px;
+
+		&:focus {
+			outline: none;
+			border-color: rgba(120, 170, 255, 0.9);
+			background: rgba(255, 255, 255, 0.18);
+		}
+	}
+
 	&__buttons {
 		display: flex;
 		gap: 8px;

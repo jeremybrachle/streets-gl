@@ -1,0 +1,20 @@
+ACTIVE (s10 cont.) — realistic CC-BY species (product branch; attribution required):
+
+realPine/  — "Pine tree" by Andriy Shekh (https://skfb.ly/6VKKJ)
+             Licensed under Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/).
+realTree/  — "Realistic Tree" by Daniel (https://sketchfab.com/danielpetrov)
+             Licensed under Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/).
+
+Each model: GLB stripped to geometry-only (embedded textures removed; we load only geometry), and the
+trunk(bark)/leaf base-color PNGs extracted to <name>_bark.png / <name>_leaf.png. realTree's 4K bark was
+downscaled to 1024. Both are 2-material (OPAQUE trunk + BLEND/alpha leaf) single trees.
+
+---
+KEPT FOR LATER (commented out in TREE_SPECIES) — stylized packs:
+
+"Ultimate Stylized Nature Pack" by Quaternius (https://quaternius.com/) — CC0.
+Species: Birch Trees, Maple Trees, Palm Trees, Trees (generic). (Quaternius Pine dropped — bent variant.)
+
+"Stylized Nature MegaKit" (Kenney-style) — mkPine, mkTree, mkTwisted.
+
+Each species' bark/leaf base-color PNGs were extracted from the source GLB and the GLB copied here.

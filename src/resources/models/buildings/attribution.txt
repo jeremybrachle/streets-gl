@@ -1,0 +1,5 @@
+Strata building models — PRODUCT branch only (CC-BY 4.0, attribution required).
+
+"Downtown Buildings Set - Low Poly model" (https://skfb.ly/puKRT) by Daniel Zhabotinsky
+is licensed under Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/).
+File: downtown.glb (the lighter-texture export of the set).

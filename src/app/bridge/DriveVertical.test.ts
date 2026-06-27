@@ -66,11 +66,58 @@ describe("stepFall — gravity toward the support", () => {
 		expect(r.y).toBeGreaterThan(0);
 	});
 
-	test("a step that would overshoot the ground catches exactly on it", () => {
-		// Just above the support with a big downward velocity → lands on the support, velocity cleared.
+	test("a step that would overshoot the ground catches exactly on it (slam absorbed)", () => {
+		// Just above the support with a big downward velocity → lands ON the support, and the violent
+		// -100 slam is ABSORBED into the gentle terrain-following rate (not carried as a bounce).
 		const r = stepFall(0.1, -100, 0, G, 0.1);
 		expect(r.y).toBe(0);
-		expect(r.vy).toBe(0);
+		expect(r.vy).toBeGreaterThan(-2); // the slam is gone
+		expect(r.vy).toBeLessThanOrEqual(0);
+	});
+
+	test("an uphill rise plants the car with no upward fling", () => {
+		// Terrain rose under the car (ramp/bump): snap UP to the support, but DON'T carry upward
+		// velocity (clamped to <= 0) so a bump can't launch the car off noisy terrain.
+		const r = stepFall(8, 0, 10, G, 0.016);
+		expect(r.y).toBe(10);
+		expect(r.vy).toBeLessThanOrEqual(0);
+		expect(r.vy).toBeGreaterThan(-0.01); // essentially zero
+	});
+
+	test("a steady fast descent GLUES to the slope — no re-launch (the basketball-bounce fix)", () => {
+		// Mimics the probe: car descending a constant downgrade at speed. The OLD model zeroed vy on
+		// every catch, so the fast-moving car re-launched each frame into little arcs (the bounce). The
+		// fixed model carries the downhill velocity, so after a brief onset transient the car hugs the
+		// surface: the airborne gap stays tiny and vy holds steady at ~ -(slope*speed), never bouncing
+		// back toward zero.
+		const dt = 1 / 60;
+		const speed = 60;    // m/s horizontal
+		const slope = 0.25;  // 25% downgrade
+		let y = 100, vy = 0, support = 100;
+		let maxGapAfterWarmup = 0;
+		for (let i = 0; i < 200; i++) {
+			support -= slope * speed * dt; // terrain drops as the car advances along it
+			const r = stepFall(y, vy, support, G, dt);
+			y = r.y;
+			vy = r.vy;
+			if (i > 60) {
+				maxGapAfterWarmup = Math.max(maxGapAfterWarmup, y - support);
+			}
+		}
+		expect(maxGapAfterWarmup).toBeLessThan(0.05); // glued to the surface, not arcing above it
+		expect(vy).toBeCloseTo(-slope * speed, 0);    // steady descent rate (~ -15), not oscillating to 0
+	});
+
+	test("a genuine convex crest still launches the car (terrain drops faster than free-fall)", () => {
+		// Flat, then the ground falls away in a cliff: the car should leave the ground (positive gap,
+		// downward velocity) rather than teleporting down — real airtime over a crest.
+		const dt = 1 / 60;
+		let y = 50, vy = 0;
+		// A couple of flat frames (grounded), then the support drops 5 units in one frame.
+		({y, vy} = stepFall(y, vy, 50, G, dt));
+		({y, vy} = stepFall(y, vy, 45, G, dt));
+		expect(y).toBeGreaterThan(45);   // didn't snap down — airborne over the drop
+		expect(vy).toBeLessThan(0);      // falling
 	});
 
 	test("velocity accumulates over successive airborne steps (real fall)", () => {

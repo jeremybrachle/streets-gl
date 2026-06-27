@@ -1,5 +1,6 @@
 import {BridgeCorridor, deckHeightAt} from "./BridgeDeck";
 import {GOLDEN_GATE_CORRIDOR} from "./corridors/GoldenGate";
+import {BAY_BRIDGE_CORRIDOR} from "./corridors/BayBridge";
 
 // The live override store — the RollerCoaster-Tycoon builder's single source of truth. The drive
 // physics reads it every frame (hot path), the bridge panel edits it. Deliberately a plain
@@ -22,7 +23,7 @@ export class BridgeRegistry {
 	 * as it is today; ON makes bridge corridors drivable as elevated decks.
 	 */
 	public courseMode = false;
-	public corridors: BridgeCorridor[] = [GOLDEN_GATE_CORRIDOR];
+	public corridors: BridgeCorridor[] = [GOLDEN_GATE_CORRIDOR, BAY_BRIDGE_CORRIDOR];
 
 	// Bumped whenever a tunable or courseMode changes (the panel calls markDirty). The visible deck
 	// mesh (DeckRibbon) watches this and rebuilds when it changes, so slider drags reshape the drawn

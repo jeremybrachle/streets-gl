@@ -36,6 +36,7 @@ uniform PerMaterial {
     vec2 biomeCoordinates;
     float time;
     vec2 usageRange;
+    float detailScale;
 };
 
 uniform sampler2DArray tNormal;
@@ -148,8 +149,12 @@ void main() {
     }
 
     vec2 normalizedTileUV = fract(vDetailUV / (TILE_SIZE * DETAIL_UV_SCALE));
-    vec3 detailNormal = textureNoTile(tDetailNoise, tDetailMaps, 1., normalizedTileUV, DETAIL_UV_SCALE * GRASS_SCALE, GRASS_SCALE);
-    vec3 detailColor = textureNoTile(tDetailNoise, tDetailMaps, 0., normalizedTileUV, DETAIL_UV_SCALE * GRASS_SCALE, GRASS_SCALE) * vBiomeColor;
+    // Strata Lane B (s15) — `detailScale` (dev-panel slider, 1.0 = engine default) tiles the base ground
+    // finer so it can match the tighter-tiled projected landuse decals. Scaling both the texture repeat
+    // and the de-tiling noise lookup together keeps textureNoTile's variation pattern intact.
+    float baseGrassScale = GRASS_SCALE * detailScale;
+    vec3 detailNormal = textureNoTile(tDetailNoise, tDetailMaps, 1., normalizedTileUV, DETAIL_UV_SCALE * baseGrassScale, baseGrassScale);
+    vec3 detailColor = textureNoTile(tDetailNoise, tDetailMaps, 0., normalizedTileUV, DETAIL_UV_SCALE * baseGrassScale, baseGrassScale) * vBiomeColor;
 
     vec3 waterUV = vec3(0);
     waterUV.xy = transformWater0.xy + vWaterUV * transformWater0.zw;
@@ -169,8 +174,17 @@ void main() {
 
     usageFactor = remap(usageFactor, -0.2, 2., 0., 1.);
 
-    vec3 usedTerrainColor = texture(tUsageMaps, vec3(normalizedTileUV * USED_TEXTURE_SCALE, 0)).rgb;
-    float usedTerrainHeight = texture(tUsageMaps, vec3(normalizedTileUV * USED_TEXTURE_SCALE, 1)).r;
+    #if WORN_DETILE == 1
+        // Strata Lane B (s15) — custom switcher ground active: make the worn near-road overlay seamless
+        // with the surrounding ground. `detailColor` is the base ground sampled via textureNoTile (crisp,
+        // de-tiled, biome-multiplied), so the heightblend below collapses to the base ground — the blurry
+        // forrest_ground patch (plain texture() at USED_TEXTURE_SCALE 8000, half-res) is gone.
+        vec3 usedTerrainColor = detailColor;
+        float usedTerrainHeight = 1.;
+    #else
+        vec3 usedTerrainColor = texture(tUsageMaps, vec3(normalizedTileUV * USED_TEXTURE_SCALE, 0)).rgb;
+        float usedTerrainHeight = texture(tUsageMaps, vec3(normalizedTileUV * USED_TEXTURE_SCALE, 1)).r;
+    #endif
 
     outColor.rgb = heightblend(outColor.rgb, 1. - usageFactor, usedTerrainColor, usedTerrainHeight);
 

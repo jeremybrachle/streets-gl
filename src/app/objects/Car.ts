@@ -10,9 +10,10 @@ import Vec3 from "~/lib/math/Vec3";
 // own part matrix for spin / steer / suspension). Both meshes are built lazily by the scene's
 // getObjectsToUpdateMesh() traversal, like every other RenderableObject3D.
 export default class Car extends RenderableObject3D {
-	// Strata Increment 4 Step B — throwaway A/B toggle (KeyB): when true, render the dropped GLB as a
-	// single static body mesh instead of the procedural box + animated wheels. Default false (box).
-	public static useGLB: boolean = false;
+	// Strata: render the GLB (Bugatti) as the car. The procedural box is kept ONLY as a load-time
+	// fallback (used by GBufferPass until glbReady, and if the GLB ever fails to parse) so there's
+	// never a "no car" frame — it is no longer user-toggleable (KeyB now toggles building collision).
+	public static useGLB: boolean = true;
 
 	public bodyMesh: AbstractMesh = null;
 	public wheelMesh: AbstractMesh = null;

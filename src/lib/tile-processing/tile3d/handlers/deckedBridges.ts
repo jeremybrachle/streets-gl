@@ -53,6 +53,14 @@ export const DECKED_BRIDGE_WAY_IDS: ReadonlySet<number> = new Set<number>([
 	1329971884, // south tower fender — natural=coastline ring
 	1330739248, // south tower fender — man_made=breakwater
 	432712872,  // south tower fender — man_made=breakwater
+
+	// --- BAY BRIDGE — WEST SPAN (SF ↔ Yerba Buena Island) ---
+	// The two I-80 carriageway ways over the water span, covered by our elevated Bay Bridge deck
+	// (BridgeRegistry corridor 'bay-bridge-west'). Suppressing them removes the flat draped roadway
+	// that was showing as a phantom "lower deck" under the elevated deck — revealing the bay water
+	// beneath. (Overpass: I-80 bridge ways over the West span; layer=2 / layer=1 carriageways.)
+	8921938,   // West span — I-80 through-deck (YBI → SF, layer 2)
+	661905446, // West span — I-80 carriageway (SF → YBI, layer 1)
 ]);
 
 // True when this feature (a roadway/sidewalk polyline OR a bridge area polygon) belongs to a bridge

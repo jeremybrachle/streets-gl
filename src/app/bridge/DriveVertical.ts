@@ -63,12 +63,20 @@ export interface FallResult {
 }
 
 /**
- * Integrate the car's height under gravity toward the support surface.
+ * Integrate the car's height toward the support surface with gravity AND ground contact.
  *
- * - Above the support: airborne — downward velocity accumulates and the car falls, until it catches
- *   the surface (then height snaps to the support, velocity resets to 0).
- * - At or below the support: grounded — height tracks the support exactly, so the car drives up ramps
- *   and over rising terrain (the ground pushes it up) with no residual velocity.
+ * Each frame we take a ballistic step (current velocity + gravity) and compare it to the support:
+ *
+ * - The ballistic path stays ABOVE the support → airborne: the ground fell away faster than the car
+ *   falls this frame (a real convex crest / a drive off the deck edge). Accumulate downward velocity
+ *   and fall.
+ * - The ballistic path reaches/passes the support → grounded: plant the car ON the support and CARRY
+ *   the downhill terrain-following velocity `(support - y)/dt`, CLAMPED to ≤ 0. This is the fix for
+ *   the "basketball bounce": on a fast descent the car keeps its downward momentum and GLUES to the
+ *   slope instead of zeroing vy each frame and re-launching into little arcs. The ≤ 0 clamp means an
+ *   uphill rise / bump just plants the car (no upward fling off noisy terrain) while a steep crest
+ *   still launches it via the airborne branch above. A hard landing's slam is absorbed down to this
+ *   gentle terrain-following rate, so it settles in a frame instead of bouncing.
  *
  * `gravity` is in world-height units / s^2 (tuned in the navigator). `dt` should be frame-clamped by
  * the caller so a frame hitch can't fling the car.
@@ -80,14 +88,19 @@ export function stepFall(
 	gravity: number,
 	dt: number
 ): FallResult {
-	if (y > support) {
-		const nvy = vy - gravity * dt;
-		const ny = y + nvy * dt;
-		if (ny <= support) {
-			return {y: support, vy: 0};
-		}
-		return {y: ny, vy: nvy};
+	if (dt <= 0) {
+		return {y, vy};
 	}
 
-	return {y: support, vy: 0};
+	const ballisticVy = vy - gravity * dt;
+	const ballisticY = y + ballisticVy * dt;
+
+	if (ballisticY > support) {
+		// Airborne — the terrain dropped away faster than the car falls this frame.
+		return {y: ballisticY, vy: ballisticVy};
+	}
+
+	// Grounded — plant on the support, carry the downhill tracking velocity (never upward).
+	const trackVy = Math.min((support - y) / dt, 0);
+	return {y: support, vy: trackVy};
 }

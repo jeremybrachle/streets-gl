@@ -13,7 +13,6 @@ import CursorStyleSystem from "./CursorStyleSystem";
 import PerspectiveCamera from "~/lib/core/PerspectiveCamera";
 import TerrainSystem from "~/app/systems/TerrainSystem";
 import SlippyControlsNavigator from "~/app/controls/SlippyControlsNavigator";
-import Car from "~/app/objects/Car";
 
 const WheelZoomFactor = 6;
 
@@ -215,12 +214,6 @@ export default class ControlsSystem extends System {
 			}
 		}
 
-		// Strata Increment 4 Step B — throwaway A/B toggle: GLB car <-> procedural box.
-		if (e.code === 'KeyB') {
-			e.preventDefault();
-			Car.useGLB = !Car.useGLB;
-			console.log(`[Strata] car model: ${Car.useGLB ? 'GLB' : 'procedural box'}`);
-		}
 	}
 
 	private mouseDownEvent(e: MouseEvent): void {

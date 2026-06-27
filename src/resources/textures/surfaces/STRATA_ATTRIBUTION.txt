@@ -1,0 +1,24 @@
+Strata Lane B — terrain ground textures (s11)
+
+aerial_grass_rock_color.png   — derived from Poly Haven "aerial_grass_rock" (diffuse), CC0
+forrest_ground_color.png      — derived from Poly Haven "forrest_ground_01" (diffuse), CC0
+forrest_ground_height.png     — derived from Poly Haven "forrest_ground_01" (displacement), CC0
+
+s12 — additional selectable base grounds (live dev-panel "Terrain texture" switcher), each diffuse
+downscaled to 1024², all Poly Haven CC0:
+leafy_grass_color.png          — "leafy_grass"
+forrest_ground_01_color.png    — "forrest_ground_01"
+coast_sand_02_color.png        — "coast_sand_02"
+coast_sand_rocks_02_color.png  — "coast_sand_rocks_02"
+rock_ground_color.png          — "rock_ground"
+rocky_terrain_02_color.png     — "rocky_terrain_02"
+
+s12 — Streets-GL original/landuse textures offered as options in the switcher use the engine's OWN
+bundled textures DIRECTLY (no new files): genericTerrainColor + biomes_blurred (the "original
+(biome-tinted)" revert), and grass/garden/forestFloor/rock/sand/soil/gravel/farmland0 each as their
+native 512² diffuse + native 512² NORMAL map (the lit relief that makes them look high-res — "Lever
+A"). Earlier 1024² _1k upscales were removed (they dropped the normals and looked flat).
+
+Source: https://polyhaven.com  — License: CC0 (public domain, no attribution required).
+Downscaled to 1024² (grass base) / 512² (earth overlay); EXR normals not used (kept the
+engine's generic_terrain_normal). data/biome_neutral.png is a generated flat 170,170,170 tile.

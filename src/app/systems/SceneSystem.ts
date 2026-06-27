@@ -25,6 +25,10 @@ import {AircraftPartType} from "~/app/vehicles/aircraft/Aircraft";
 import Car from "~/app/objects/Car";
 import DeckRibbon from "~/app/objects/DeckRibbon";
 import BridgeModelObject from "~/app/objects/BridgeModelObject";
+import CollisionDebugMesh from "~/app/objects/CollisionDebugMesh";
+import WorldTreeScatter from "~/app/objects/WorldTreeScatter";
+import BuildingModelObject from "~/app/objects/BuildingModelObject";
+import ModelBuildingScatter from "~/app/objects/ModelBuildingScatter";
 
 interface SceneObjects {
 	wrapper: Object3D;
@@ -45,6 +49,19 @@ interface SceneObjects {
 	// Strata Lane B Increment 9 — the GGB hero MODEL (CC-BY GLB; drawn by GBufferPass.renderBridgeModel
 	// over the deck as a decoupled visual prop).
 	bridgeModel: BridgeModelObject;
+	// Strata physics spike — the VISIBLE building-collision overlay (red footprint decals, drawn by
+	// GBufferPass.renderCollisionDebug, gated by buildingCollisionRegistry.showDebug).
+	collisionDebug: CollisionDebugMesh;
+	// Strata Lane B (s11) — world-wide model-tree scatter: per-tile clusters built from the engine's
+	// OSM forest 'tree' instance buffers, near-camera only (drawn by GBufferPass.renderWorldTreeScatter).
+	worldTreeScatter: WorldTreeScatter;
+	// Strata Lane B (s13) — the downtown building kit; hand-placed test buildings (drawn by
+	// GBufferPass.renderPlacedBuildings, gated by placedBuildingsState, KeyU). Footprint→model probe.
+	placedBuildings: BuildingModelObject;
+	// Strata Lane B (s13) — procedural model-building city: near-camera tiles get kit buildings fitted
+	// to real OSM footprints, original extrusions hidden (drawn by GBufferPass.renderModelBuildingScatter,
+	// gated by placedBuildingsState.enabled, KeyU).
+	modelBuildingScatter: ModelBuildingScatter;
 }
 
 export default class SceneSystem extends System {
@@ -84,6 +101,10 @@ export default class SceneSystem extends System {
 		const car = new Car();
 		const deckRibbon = new DeckRibbon();
 		const bridgeModel = new BridgeModelObject();
+		const collisionDebug = new CollisionDebugMesh();
+		const worldTreeScatter = new WorldTreeScatter();
+		const placedBuildings = new BuildingModelObject();
+		const modelBuildingScatter = new ModelBuildingScatter();
 
 		this.objects = {
 			wrapper,
@@ -97,7 +118,11 @@ export default class SceneSystem extends System {
 			instancedAircraftParts: new Map(),
 			car,
 			deckRibbon,
-			bridgeModel
+			bridgeModel,
+			collisionDebug,
+			worldTreeScatter,
+			placedBuildings,
+			modelBuildingScatter
 		};
 
 		/*this.objects.instancedAircraftParts.set(
@@ -157,7 +182,8 @@ export default class SceneSystem extends System {
 
 		this.scene.add(wrapper);
 		wrapper.add(
-			camera, csm, skybox, tiles, labels, terrain, car, deckRibbon, bridgeModel,
+			camera, csm, skybox, tiles, labels, terrain, car, deckRibbon, bridgeModel, collisionDebug,
+			worldTreeScatter, placedBuildings, modelBuildingScatter,
 			...this.objects.instancedObjects.values(),
 			...this.objects.instancedAircraftParts.values()
 		);

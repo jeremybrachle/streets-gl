@@ -43,6 +43,13 @@ export default class TerrainMaterialContainer extends MaterialContainer {
 					type: RendererTypes.UniformType.Float2,
 					value: new Float32Array(2)
 				}, {
+					// Strata Lane B (s15) — live base-terrain tiling multiplier (dev-panel slider). 1.0 =
+					// engine default; higher = finer/less-zoomed so the base ground can match the decals.
+					name: 'detailScale',
+					block: 'PerMaterial',
+					type: RendererTypes.UniformType.Float1,
+					value: new Float32Array([1])
+				}, {
 					name: 'transformNormal0',
 					block: 'PerMesh',
 					type: RendererTypes.UniformType.Float4,
@@ -128,9 +135,11 @@ export default class TerrainMaterialContainer extends MaterialContainer {
 					type: RendererTypes.UniformType.Texture2DArray,
 					value: this.renderer.createTexture2DArray({
 						depth: 2,
+						// Strata Lane B (s11) — Poly Haven CC0 "forrest_ground_01" as the worn/used overlay
+						// (height-blended near roads/buildings) instead of the arid sandy soil. 512² to match.
 						data: [
-							ResourceLoader.get('sandySoilDiffuse'),
-							ResourceLoader.get('sandySoilHeight')
+							ResourceLoader.get('forrestGroundColor'),
+							ResourceLoader.get('forrestGroundHeight')
 						],
 						anisotropy: 16,
 						minFilter: RendererTypes.MinFilter.LinearMipmapLinear,
@@ -145,8 +154,10 @@ export default class TerrainMaterialContainer extends MaterialContainer {
 					type: RendererTypes.UniformType.Texture2DArray,
 					value: this.renderer.createTexture2DArray({
 						depth: 2,
+						// Strata Lane B (s11) — Poly Haven CC0 "aerial_grass_rock" as the base ground color
+						// (1024² to match the kept generic normal) so terrain reads as grass, not arid soil.
 						data: [
-							ResourceLoader.get('genericTerrainColor'),
+							ResourceLoader.get('aerialGrassColor'),
 							ResourceLoader.get('genericTerrainNormal'),
 						],
 						anisotropy: 16,
@@ -188,7 +199,11 @@ export default class TerrainMaterialContainer extends MaterialContainer {
 					type: RendererTypes.UniformType.Texture2D,
 					value: this.renderer.createTexture2D({
 						anisotropy: 16,
-						data: ResourceLoader.get('biomeMap'),
+						// Strata Lane B (s11) — neutral biome map: the shader does `biome.rgb * 1.5`, so a
+						// flat 170/255 ≈ 0.667 yields a 1.0 tint (identity), letting the grass show its
+						// natural color instead of the arid regional biome tint. Swap back to 'biomeMap'
+						// (biomes_blurred) to restore regional biome coloring.
+						data: ResourceLoader.get('biomeNeutral'),
 						minFilter: RendererTypes.MinFilter.Linear,
 						magFilter: RendererTypes.MagFilter.Linear,
 						wrap: RendererTypes.TextureWrap.Repeat,
@@ -204,6 +219,12 @@ export default class TerrainMaterialContainer extends MaterialContainer {
 				USAGE_TEXTURE_PADDING: Config.TerrainUsageTexturePadding.toFixed(1),
 				TILE_SIZE: Config.TileSize.toFixed(10),
 				DETAIL_UV_SCALE: Config.TerrainDetailUVScale.toFixed(10),
+				// Strata Lane B (s15) — when a CUSTOM switcher ground is active, the worn "usage" overlay
+				// near roads/buildings is sampled seamlessly from the base ground (de-tiled at the crisp
+				// base scale) instead of the blurry plain-texture() forrest_ground at USED_TEXTURE_SCALE.
+				// '0' = pristine engine default (GBufferPass.syncTerrainTexture flips it to '1' on a custom
+				// selection + recompiles, so the default look is byte-for-byte untouched).
+				WORN_DETILE: '0',
 			},
 			primitive: {
 				frontFace: RendererTypes.FrontFace.CCW,

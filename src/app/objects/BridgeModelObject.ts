@@ -4,6 +4,7 @@ import AbstractRenderer from "~/lib/renderer/abstract-renderer/AbstractRenderer"
 import {RendererTypes} from "~/lib/renderer/RendererTypes";
 import Vec3 from "~/lib/math/Vec3";
 import {createBridgeModelFromGLB} from "~/app/objects/models/BridgeModel";
+import {Polygon2D} from "~/app/collision/towerFootprints";
 
 // Strata Lane B Increment 9 — the GGB hero model as a RenderableObject3D (mirrors Car/DeckRibbon). A
 // single static vertex-coloured mesh built lazily from the loaded GLB; placed/scaled/yawed by
@@ -14,6 +15,8 @@ export default class BridgeModelObject extends RenderableObject3D {
 	public tried = false;
 	/** Span-axis length (local +X) of the normalized mesh in model units, for the default-scale guess. */
 	public spanUnits = 0;
+	/** Tower-leg footprints (model-local XZ) for collision; transformed to world by renderBridgeModel. */
+	public legFootprints: Polygon2D[] = [];
 
 	public constructor() {
 		super();
@@ -34,6 +37,7 @@ export default class BridgeModelObject extends RenderableObject3D {
 		try {
 			const model = createBridgeModelFromGLB();
 			this.spanUnits = model.spanUnits;
+			this.legFootprints = model.legFootprints;
 			const b = model.buffers;
 			this.mesh = renderer.createMesh({
 				indexed: true,

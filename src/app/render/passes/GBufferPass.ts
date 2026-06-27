@@ -43,9 +43,25 @@ import PerspectiveCamera from "~/lib/core/PerspectiveCamera";
 import ControlsSystem from "~/app/systems/ControlsSystem";
 import CarMaterialContainer from "~/app/render/materials/CarMaterialContainer";
 import DeckMaterialContainer from "~/app/render/materials/DeckMaterialContainer";
+import TreeModelMaterialContainer from "~/app/render/materials/TreeModelMaterialContainer";
+import BuildingModelMaterialContainer from "~/app/render/materials/BuildingModelMaterialContainer";
+import {placedBuildingsState} from "~/app/objects/models/placedBuildingsState";
+import {computeBuildingPlacement} from "~/app/objects/models/buildingPlacement";
 import {CarWheelMounts, WheelRadius} from "~/app/objects/models/CarModel";
 import Car from "~/app/objects/Car";
 import {bridgeRegistry} from "~/app/bridge/BridgeRegistry";
+import {terrainTextureRegistry} from "~/app/render/materials/TerrainTextureRegistry";
+import ResourceLoader from "~/app/world/ResourceLoader";
+import {RendererTypes} from "~/lib/renderer/RendererTypes";
+import {buildingCollisionRegistry, ModelFootprint} from "~/app/collision/BuildingCollisionRegistry";
+import {polygonAABB} from "~/app/collision/FootprintCollision";
+import Vec3 from "~/lib/math/Vec3";
+import BridgeModelObject from "~/app/objects/BridgeModelObject";
+import {BridgeCorridor} from "~/app/bridge/BridgeDeck";
+
+// Below the deck by this much (world Y) the bridge towers stop colliding, so driving UNDER the bridge
+// is free while on the deck you still can't cut through a tower leg.
+const BridgeTowerCollisionYBand = 20;
 
 export default class GBufferPass extends Pass<{
 	GBufferRenderPass: {
@@ -88,13 +104,25 @@ export default class GBufferPass extends Pass<{
 	private aircraftMaterial: AbstractMaterial;
 	private carMaterial: AbstractMaterial;
 	private deckMaterial: AbstractMaterial;
+	// Strata Lane B (s10 models) — textured tree materials, one per texture resource (bark = opaque,
+	// leaf = alpha cutout), cached + reused across species so adding a species needs no new field.
+	private treeMaterials: Map<string, AbstractMaterial> = new Map();
+	private buildingMaterials: Map<string, AbstractMaterial> = new Map();
+	// Strata Lane B (s12) — live terrain base-ground texture switch. Cache one [color, normal]
+	// Texture2DArray per ResourceLoader key (the constructor's array is seeded under its key);
+	// `terrainTextureRevision` tracks the last applied registry revision so we only rebind on change.
+	private terrainDetailMaps: Map<string, AbstractTexture2DArray> = new Map();
+	// Strata Lane B (s12) — cache the two biome maps so a ground option can pick neutral (own color)
+	// or regional (the engine's biome tint, needed to make the near-white original ground look right).
+	private terrainBiomeMaps: Map<string, AbstractTexture2D> = new Map();
+	private terrainTextureRevision = -1;
 	private cameraMatrixWorldInversePrev: Mat4 = null;
 	// Previous-frame car part matrices, for correct TAA motion vectors (index 0 = body/GLB, 1-4 = wheels).
 	private carMatricesPrev: Mat4[] = [];
-	// Previous-frame deck-ribbon origin-relative matrix, for its TAA motion vector.
-	private deckMatrixPrev: Mat4 = null;
-	// Previous-frame GGB hero-model origin-relative matrix, for its TAA motion vector.
-	private bridgeModelMatrixPrev: Mat4 = null;
+	// Previous-frame collision-debug-overlay origin-relative matrix, for its TAA motion vector.
+	private collisionDebugMatrixPrev: Mat4 = null;
+	// Signature of the last bridge-model placement the tower collision footprints were synced to.
+	private bridgeFootprintSig: string = '';
 	public objectIdBuffer: Uint32Array = new Uint32Array(1);
 	public objectIdX = 0;
 	public objectIdY = 0;
@@ -171,6 +199,108 @@ export default class GBufferPass extends Pass<{
 
 		this.carMaterial = new CarMaterialContainer(this.renderer).material;
 		this.deckMaterial = new DeckMaterialContainer(this.renderer).material;
+
+		// Strata Lane B (s12) — seed the terrain detail-map cache with the array the container already
+		// built (base = 'aerialGrassColor', the default option) so a "revert to current grass" needs no
+		// rebuild. Other base grounds are built lazily on first selection by syncTerrainTexture().
+		this.terrainDetailMaps.set(
+			'aerialGrassColor|genericTerrainNormal',
+			this.terrainMaterial.getUniform<UniformTexture2DArray>('tDetailMaps').value as AbstractTexture2DArray
+		);
+		// Seed the neutral biome map the container already built (the s11 flat-170 identity tile).
+		this.terrainBiomeMaps.set(
+			'neutral',
+			this.terrainMaterial.getUniform('tBiomeMap').value as AbstractTexture2D
+		);
+	}
+
+	// Strata Lane B (s12) — rebind the terrain base-ground texture when the dev panel changes it.
+	// Builds a [color, normal] Texture2DArray per diffuse+normal pair on first use: the Streets-GL
+	// options pair their NATIVE normal map (lit relief = the high-res look); Poly Haven sets fall back
+	// to the generic normal (EXR normals can't load in WebGL). No-op unless the registry's revision
+	// moved, so it's cheap to call every terrain frame.
+	private syncTerrainTexture(): void {
+		if (terrainTextureRegistry.revision === this.terrainTextureRevision) {
+			return;
+		}
+		this.terrainTextureRevision = terrainTextureRegistry.revision;
+
+		const key = terrainTextureRegistry.currentResourceKey();
+		const normalKey = terrainTextureRegistry.currentNormalKey();
+		// Cache by diffuse+normal so an option that pairs a different normal gets its own array. Pairing
+		// the engine textures with their REAL normals (not one shared flat one) is what restores the
+		// lit surface relief that makes them read as high-res (Lever A).
+		const cacheKey = `${key}|${normalKey}`;
+		let array = this.terrainDetailMaps.get(cacheKey);
+		if (!array) {
+			array = this.renderer.createTexture2DArray({
+				depth: 2,
+				data: [
+					ResourceLoader.get(key),
+					ResourceLoader.get(normalKey),
+				],
+				anisotropy: 16,
+				minFilter: RendererTypes.MinFilter.LinearMipmapLinear,
+				magFilter: RendererTypes.MagFilter.Linear,
+				wrap: RendererTypes.TextureWrap.Repeat,
+				format: RendererTypes.TextureFormat.RGBA8Unorm,
+				mipmaps: true
+			});
+			this.terrainDetailMaps.set(cacheKey, array);
+		}
+
+		this.terrainMaterial.getUniform<UniformTexture2DArray>('tDetailMaps').value = array;
+
+		// Swap the biome map to match the ground: 'regional' restores the engine's biome tint (needed
+		// for the near-white original ground), 'neutral' lets a colored Poly Haven set show as-is.
+		const biomeMode = terrainTextureRegistry.currentBiome();
+		let biome = this.terrainBiomeMaps.get(biomeMode);
+		if (!biome) {
+			biome = this.renderer.createTexture2D({
+				anisotropy: 16,
+				data: ResourceLoader.get(biomeMode === 'regional' ? 'biomeMap' : 'biomeNeutral'),
+				minFilter: RendererTypes.MinFilter.Linear,
+				magFilter: RendererTypes.MagFilter.Linear,
+				wrap: RendererTypes.TextureWrap.Repeat,
+				format: RendererTypes.TextureFormat.RGBA8Unorm,
+				mipmaps: false
+			});
+			this.terrainBiomeMaps.set(biomeMode, biome);
+		}
+		this.terrainMaterial.getUniform('tBiomeMap').value = biome;
+
+		// Strata Lane B (s15) — gate the seamless worn-overlay fix to CUSTOM grounds only. The default
+		// option (options[0]) keeps the engine's original blurry-but-pristine near-road overlay so the
+		// out-of-the-box look is byte-for-byte unchanged (the s12 mistake was altering the default). Any
+		// other selection de-tiles the worn patch into the base ground via the WORN_DETILE shader branch.
+		const isCustom = terrainTextureRegistry.currentId !== terrainTextureRegistry.options[0].id;
+		const wornDetile = isCustom ? '1' : '0';
+		if (this.terrainMaterial.defines.WORN_DETILE !== wornDetile) {
+			this.terrainMaterial.defines.WORN_DETILE = wornDetile;
+			this.terrainMaterial.recompile();
+		}
+	}
+
+	// Lazily build + cache a tree-MODEL material for a texture resource (one per species' bark / leaf).
+	// Named ...Model to avoid colliding with `treeMaterial` (the engine's instanced-billboard material).
+	private treeModelMaterial(textureResource: string): AbstractMaterial {
+		let mat = this.treeMaterials.get(textureResource);
+		if (!mat) {
+			mat = new TreeModelMaterialContainer(this.renderer, textureResource).material;
+			this.treeMaterials.set(textureResource, mat);
+		}
+		return mat;
+	}
+
+	// Lazily build + cache a building material for a facade texture (keyed by the building's textureKey;
+	// the decoded image comes from the loaded GLB via the placedBuildings object). One per facade.
+	private buildingMaterial(textureKey: string, image: any): AbstractMaterial {
+		let mat = this.buildingMaterials.get(textureKey);
+		if (!mat) {
+			mat = new BuildingModelMaterialContainer(this.renderer, image).material;
+			this.buildingMaterials.set(textureKey, mat);
+		}
+		return mat;
 	}
 
 	private updateMaterialsDefines(): void {
@@ -274,6 +404,7 @@ export default class GBufferPass extends Pass<{
 		const terrainRingHeight = <AbstractTexture2DArray>this.getPhysicalResource('TerrainRingHeight').colorAttachments[0].texture;
 		const biomePos = MathUtils.meters2tile(camera.position.x, camera.position.z, 0);
 
+		this.syncTerrainTexture();
 		this.terrainMaterial.getUniform('tRingHeight').value = terrainRingHeight;
 		this.terrainMaterial.getUniform('tNormal').value = terrainNormal;
 		this.terrainMaterial.getUniform('tWater').value = terrainWater;
@@ -290,6 +421,8 @@ export default class GBufferPass extends Pass<{
 		this.terrainMaterial.getUniform<UniformFloat1>('usageRange', 'PerMaterial').value[0] = window.from ?? 0;
 		// @ts-ignore
 		this.terrainMaterial.getUniform<UniformFloat1>('usageRange', 'PerMaterial').value[1] = window.to ?? 0;
+		// Strata Lane B (s15) — live base-terrain tiling from the dev panel (1.0 = pristine default).
+		this.terrainMaterial.getUniform<UniformFloat1>('detailScale', 'PerMaterial').value[0] = terrainTextureRegistry.detailScale;
 		this.terrainMaterial.updateUniformBlock('PerMaterial');
 
 		for (let i = 0; i < terrain.children.length; i++) {
@@ -670,29 +803,20 @@ export default class GBufferPass extends Pass<{
 			deck.rebuild(this.renderer, (x, z) => terrainHeightProvider.getHeightGlobalInterpolated(x, z, true));
 		}
 
-		if (!deck.mesh) {
+		if (deck.decks.length === 0) {
 			return;
 		}
 
 		const camera = this.manager.sceneSystem.objects.camera;
 
-		// Origin-relative translate: the mesh holds (vertex - anchor); this puts it back at (vertex -
-		// origin) so modelMatrix's +origin translation lands it at the true world position.
-		let deckMatrix = Mat4.identity();
-		deckMatrix = Mat4.translate(
-			deckMatrix,
-			deck.anchor[0] - instancesOrigin.x,
-			0,
-			deck.anchor[1] - instancesOrigin.y
-		);
-
+		// All deck meshes share one modelMatrix (the instances-origin translate); each corridor's mesh
+		// then carries its OWN carMatrix = translate(anchor - origin) to finish the precision pivot.
 		deck.position.set(instancesOrigin.x, 0, instancesOrigin.y);
 		deck.updateMatrix();
 		deck.updateMatrixWorld();
 
 		const material = this.deckMaterial;
 		const mvMatrixPrev = Mat4.multiply(this.cameraMatrixWorldInversePrev, deck.matrixWorld);
-		const prev = this.deckMatrixPrev ?? deckMatrix;
 
 		this.renderer.useMaterial(material);
 
@@ -700,13 +824,80 @@ export default class GBufferPass extends Pass<{
 		material.getUniform('modelMatrix', 'MainBlock').value = new Float32Array(deck.matrixWorld.values);
 		material.getUniform('viewMatrix', 'MainBlock').value = new Float32Array(camera.matrixWorldInverse.values);
 		material.getUniform('modelViewMatrixPrev', 'MainBlock').value = new Float32Array(mvMatrixPrev.values);
-		material.getUniform('carMatrix', 'MainBlock').value = new Float32Array(deckMatrix.values);
+
+		for (const corridorDeck of deck.decks) {
+			// Origin-relative translate: the mesh holds (vertex - anchor); this puts it back at (vertex -
+			// origin) so modelMatrix's +origin translation lands it at the true world position. The deck
+			// is static, so carMatrixPrev == carMatrix (no per-object motion vector).
+			let deckMatrix = Mat4.identity();
+			deckMatrix = Mat4.translate(
+				deckMatrix,
+				corridorDeck.anchor[0] - instancesOrigin.x,
+				0,
+				corridorDeck.anchor[1] - instancesOrigin.y
+			);
+
+			material.getUniform('carMatrix', 'MainBlock').value = new Float32Array(deckMatrix.values);
+			material.getUniform('carMatrixPrev', 'MainBlock').value = new Float32Array(deckMatrix.values);
+			material.updateUniformBlock('MainBlock');
+
+			corridorDeck.mesh.draw();
+		}
+	}
+
+	// Strata physics spike — the building-collision debug overlay. Red footprint decals showing exactly
+	// the convex polygons the car is pushed out of, so the user can see how far the boundary reaches vs
+	// the drawn building. Gated on buildingCollisionRegistry.showDebug; rebuilds from the registry (as
+	// tiles stream) against the real terrain, like the deck. Reuses the car vertex-colour material.
+	private renderCollisionDebug(instancesOrigin: Vec2): void {
+		if (!buildingCollisionRegistry.showDebug) {
+			return;
+		}
+
+		const overlay = this.manager.sceneSystem.objects.collisionDebug;
+		const camera = this.manager.sceneSystem.objects.camera;
+
+		const terrainHeightProvider = this.manager.systemManager.getSystem(TerrainSystem).terrainHeightProvider;
+		overlay.maybeRebuild(
+			this.renderer,
+			(x, z) => terrainHeightProvider.getHeightGlobalInterpolated(x, z, true),
+			camera.position.x,
+			camera.position.z
+		);
+
+		if (!overlay.mesh) {
+			return;
+		}
+
+		let debugMatrix = Mat4.identity();
+		debugMatrix = Mat4.translate(
+			debugMatrix,
+			overlay.anchor[0] - instancesOrigin.x,
+			0,
+			overlay.anchor[1] - instancesOrigin.y
+		);
+
+		overlay.position.set(instancesOrigin.x, 0, instancesOrigin.y);
+		overlay.updateMatrix();
+		overlay.updateMatrixWorld();
+
+		const material = this.carMaterial;
+		const mvMatrixPrev = Mat4.multiply(this.cameraMatrixWorldInversePrev, overlay.matrixWorld);
+		const prev = this.collisionDebugMatrixPrev ?? debugMatrix;
+
+		this.renderer.useMaterial(material);
+
+		material.getUniform('projectionMatrix', 'MainBlock').value = new Float32Array(camera.jitteredProjectionMatrix.values);
+		material.getUniform('modelMatrix', 'MainBlock').value = new Float32Array(overlay.matrixWorld.values);
+		material.getUniform('viewMatrix', 'MainBlock').value = new Float32Array(camera.matrixWorldInverse.values);
+		material.getUniform('modelViewMatrixPrev', 'MainBlock').value = new Float32Array(mvMatrixPrev.values);
+		material.getUniform('carMatrix', 'MainBlock').value = new Float32Array(debugMatrix.values);
 		material.getUniform('carMatrixPrev', 'MainBlock').value = new Float32Array(prev.values);
 		material.updateUniformBlock('MainBlock');
 
-		deck.mesh.draw();
+		overlay.mesh.draw();
 
-		this.deckMatrixPrev = deckMatrix;
+		this.collisionDebugMatrixPrev = debugMatrix;
 	}
 
 	// Strata Lane B Increment 9 — the GGB hero model. A decoupled VISUAL prop placed over the drivable
@@ -715,54 +906,259 @@ export default class GBufferPass extends Pass<{
 	// translate(anchor - origin + offset) * yaw * scale, modelMatrix re-adds the origin. Reuses the car
 	// vertex-colour material (the model is fully baseColorFactor-coloured). Best-effort; never gates drive.
 	private renderBridgeModel(instancesOrigin: Vec2): void {
-		const corridor = bridgeRegistry.corridors[0];
-		if (!corridor || !corridor.modelEnabled || !corridor.modelAnchor) {
-			return;
+		const model = this.manager.sceneSystem.objects.bridgeModel;
+		const corridors = bridgeRegistry.corridors;
+
+		// Tower-collision footprints stay tied to the GGB corridor (the parked feature) — keep syncing
+		// the first corridor. Cheap: only recomputes when the signature changes.
+		const ggb = corridors[0];
+		const sig = `${bridgeRegistry.revision}:${model.legFootprints.length}:${ggb?.modelEnabled ? 1 : 0}`;
+		if (sig !== this.bridgeFootprintSig) {
+			this.bridgeFootprintSig = sig;
+			this.syncBridgeModelFootprints(ggb, model);
 		}
 
-		const model = this.manager.sceneSystem.objects.bridgeModel;
 		if (!model.mesh) {
 			return;
 		}
 
 		const camera = this.manager.sceneSystem.objects.camera;
+		const material = this.carMaterial;
+
+		// All hero models share one mesh (the GGB GLB) + one modelMatrix (the origin translate); each
+		// corridor that enables a model draws it with its OWN placement transform via carMatrix. Reusing
+		// the same GLB is intentional — the Bay Bridge West span is a suspension bridge too (s14).
+		model.position.set(instancesOrigin.x, 0, instancesOrigin.y);
+		model.updateMatrix();
+		model.updateMatrixWorld();
+		const mvMatrixPrev = Mat4.multiply(this.cameraMatrixWorldInversePrev, model.matrixWorld);
+
+		this.renderer.useMaterial(material);
+		material.getUniform('projectionMatrix', 'MainBlock').value = new Float32Array(camera.jitteredProjectionMatrix.values);
+		material.getUniform('modelMatrix', 'MainBlock').value = new Float32Array(model.matrixWorld.values);
+		material.getUniform('viewMatrix', 'MainBlock').value = new Float32Array(camera.matrixWorldInverse.values);
+		material.getUniform('modelViewMatrixPrev', 'MainBlock').value = new Float32Array(mvMatrixPrev.values);
+
+		for (const corridor of corridors) {
+			if (!corridor || !corridor.modelEnabled || !corridor.modelAnchor) {
+				continue;
+			}
+
+			const scale = corridor.modelScale ?? 1;
+			const stretch = corridor.modelStretch ?? 1;
+			const yaw = corridor.modelYaw ?? 0;
+			const [ax, az] = corridor.modelAnchor;
+
+			// translate(anchor - origin + offset) * yaw * scale, applied to the origin-centered mesh.
+			// The model is static, so carMatrixPrev == carMatrix (no per-object motion vector).
+			let bridgeMatrix = Mat4.identity();
+			bridgeMatrix = Mat4.translate(
+				bridgeMatrix,
+				ax - instancesOrigin.x + (corridor.modelOffsetX ?? 0),
+				corridor.modelOffsetY ?? 0,
+				az - instancesOrigin.y + (corridor.modelOffsetZ ?? 0)
+			);
+			bridgeMatrix = Mat4.yRotate(bridgeMatrix, yaw);
+			bridgeMatrix = Mat4.scale(bridgeMatrix, scale * stretch, scale, scale);
+
+			material.getUniform('carMatrix', 'MainBlock').value = new Float32Array(bridgeMatrix.values);
+			material.getUniform('carMatrixPrev', 'MainBlock').value = new Float32Array(bridgeMatrix.values);
+			material.updateUniformBlock('MainBlock');
+
+			model.mesh.draw();
+		}
+	}
+
+	// Strata Lane B (s11) — draw the world-wide model-tree scatter: per-tile clusters built from the
+	// engine's OSM forest 'tree' buffers, near-camera only. Reconciles the resident clusters first
+	// (build/teardown by distance), then draws each tile's species bark+leaf meshes. Same precision
+	// pivot as renderTreeCluster: one shared modelMatrix at the origin, a per-tile carMatrix carrying
+	// translate(tileAnchor - origin). Trees are static, so carMatrixPrev == carMatrix (no object motion).
+	private renderWorldTreeScatter(instancesOrigin: Vec2): void {
+		const scatter = this.manager.sceneSystem.objects.worldTreeScatter;
+
+		scatter.sync(this.renderer, this.manager.sceneSystem.objects.tiles);
+
+		if (scatter.clusters.size === 0) {
+			return;
+		}
+
+		const camera = this.manager.sceneSystem.objects.camera;
+
+		scatter.position.set(instancesOrigin.x, 0, instancesOrigin.y);
+		scatter.updateMatrix();
+		scatter.updateMatrixWorld();
+
+		const mvMatrixPrev = Mat4.multiply(this.cameraMatrixWorldInversePrev, scatter.matrixWorld);
+		const modelMatrix = new Float32Array(scatter.matrixWorld.values);
+		const projMatrix = new Float32Array(camera.jitteredProjectionMatrix.values);
+		const viewMatrix = new Float32Array(camera.matrixWorldInverse.values);
+		const mvPrev = new Float32Array(mvMatrixPrev.values);
+
+		const drawWith = (material: AbstractMaterial, mesh: AbstractMesh, treeMatrix: Float32Array): void => {
+			this.renderer.useMaterial(material);
+			material.getUniform('projectionMatrix', 'MainBlock').value = projMatrix;
+			material.getUniform('modelMatrix', 'MainBlock').value = modelMatrix;
+			material.getUniform('viewMatrix', 'MainBlock').value = viewMatrix;
+			material.getUniform('modelViewMatrixPrev', 'MainBlock').value = mvPrev;
+			material.getUniform('carMatrix', 'MainBlock').value = treeMatrix;
+			material.getUniform('carMatrixPrev', 'MainBlock').value = treeMatrix;
+			material.updateUniformBlock('MainBlock');
+			mesh.draw();
+		};
+
+		for (const cluster of scatter.clusters.values()) {
+			if (cluster.species.length === 0) {
+				continue;
+			}
+
+			const m = Mat4.translate(Mat4.identity(),
+				cluster.anchor[0] - instancesOrigin.x, 0, cluster.anchor[1] - instancesOrigin.y);
+			const treeMatrix = new Float32Array(m.values);
+
+			for (const s of cluster.species) {
+				if (s.barkMesh) drawWith(this.treeModelMaterial(s.bark), s.barkMesh, treeMatrix);
+				if (s.leafMesh && s.leaf) drawWith(this.treeModelMaterial(s.leaf), s.leafMesh, treeMatrix);
+			}
+		}
+	}
+
+	// Strata Lane B (s13) — draw the HAND-PLACED test buildings (KeyU). For each placed instance,
+	// compute the placement transform from its footprint OMBB + the chosen building's source dims
+	// (buildingPlacement), then draw each facade part with its own texture. Same precision pivot as
+	// renderWorldTreeScatter: one shared modelMatrix at the origin, a per-instance carMatrix carrying
+	// translate(anchor - origin) · yRotate(yaw) · scale. Static → carMatrixPrev == carMatrix.
+	private renderPlacedBuildings(instancesOrigin: Vec2): void {
+		if (!placedBuildingsState.enabled || placedBuildingsState.instances.length === 0) {
+			return;
+		}
+
+		const obj = this.manager.sceneSystem.objects.placedBuildings;
+		const set = obj.getBuilding(this.renderer, placedBuildingsState.buildingIndex);
+		if (!set) {
+			return;
+		}
+
+		const camera = this.manager.sceneSystem.objects.camera;
+		obj.position.set(instancesOrigin.x, 0, instancesOrigin.y);
+		obj.updateMatrix();
+		obj.updateMatrixWorld();
+
+		const mvMatrixPrev = Mat4.multiply(this.cameraMatrixWorldInversePrev, obj.matrixWorld);
+		const modelMatrix = new Float32Array(obj.matrixWorld.values);
+		const projMatrix = new Float32Array(camera.jitteredProjectionMatrix.values);
+		const viewMatrix = new Float32Array(camera.matrixWorldInverse.values);
+		const mvPrev = new Float32Array(mvMatrixPrev.values);
+
+		for (const inst of placedBuildingsState.instances) {
+			const p = computeBuildingPlacement(inst.rect, inst.targetHeight, set.dims, inst.groundY);
+
+			// translate(anchor - origin) · yRotate(yaw) · scale, on the origin-centered (recentered) mesh.
+			let m = Mat4.translate(Mat4.identity(),
+				p.anchorX - instancesOrigin.x, p.anchorY, p.anchorZ - instancesOrigin.y);
+			m = Mat4.yRotate(m, p.yaw);
+			m = Mat4.scale(m, p.scaleX, p.scaleY, p.scaleZ);
+			const buildingMatrix = new Float32Array(m.values);
+
+			for (const part of set.parts) {
+				const image = obj.images.get(part.textureKey);
+				if (!image) {
+					continue;
+				}
+				const material = this.buildingMaterial(part.textureKey, image);
+				this.renderer.useMaterial(material);
+				material.getUniform('projectionMatrix', 'MainBlock').value = projMatrix;
+				material.getUniform('modelMatrix', 'MainBlock').value = modelMatrix;
+				material.getUniform('viewMatrix', 'MainBlock').value = viewMatrix;
+				material.getUniform('modelViewMatrixPrev', 'MainBlock').value = mvPrev;
+				material.getUniform('carMatrix', 'MainBlock').value = buildingMatrix;
+				material.getUniform('carMatrixPrev', 'MainBlock').value = buildingMatrix;
+				material.updateUniformBlock('MainBlock');
+				part.mesh.draw();
+			}
+		}
+	}
+
+	// Strata Lane B (s13) — draw the PROCEDURAL model-building city (KeyU). Same precision pivot as the
+	// tree scatter: one shared modelMatrix at the origin, per-tile carMatrix = translate(tileAnchor -
+	// origin). Each tile holds one merged mesh per facade texture; static → carMatrixPrev == carMatrix.
+	private renderModelBuildingScatter(instancesOrigin: Vec2): void {
+		const scatter = this.manager.sceneSystem.objects.modelBuildingScatter;
+		scatter.sync(this.renderer, this.manager.sceneSystem.objects.tiles);
+
+		if (scatter.clusters.size === 0) {
+			return;
+		}
+
+		const camera = this.manager.sceneSystem.objects.camera;
+		scatter.position.set(instancesOrigin.x, 0, instancesOrigin.y);
+		scatter.updateMatrix();
+		scatter.updateMatrixWorld();
+
+		const mvMatrixPrev = Mat4.multiply(this.cameraMatrixWorldInversePrev, scatter.matrixWorld);
+		const modelMatrix = new Float32Array(scatter.matrixWorld.values);
+		const projMatrix = new Float32Array(camera.jitteredProjectionMatrix.values);
+		const viewMatrix = new Float32Array(camera.matrixWorldInverse.values);
+		const mvPrev = new Float32Array(mvMatrixPrev.values);
+
+		for (const cluster of scatter.clusters.values()) {
+			if (cluster.parts.length === 0) {
+				continue;
+			}
+			const m = Mat4.translate(Mat4.identity(),
+				cluster.anchor[0] - instancesOrigin.x, 0, cluster.anchor[1] - instancesOrigin.y);
+			const tileMatrix = new Float32Array(m.values);
+
+			for (const part of cluster.parts) {
+				const image = scatter.images.get(part.textureKey);
+				if (!image) {
+					continue;
+				}
+				const material = this.buildingMaterial(part.textureKey, image);
+				this.renderer.useMaterial(material);
+				material.getUniform('projectionMatrix', 'MainBlock').value = projMatrix;
+				material.getUniform('modelMatrix', 'MainBlock').value = modelMatrix;
+				material.getUniform('viewMatrix', 'MainBlock').value = viewMatrix;
+				material.getUniform('modelViewMatrixPrev', 'MainBlock').value = mvPrev;
+				material.getUniform('carMatrix', 'MainBlock').value = tileMatrix;
+				material.getUniform('carMatrixPrev', 'MainBlock').value = tileMatrix;
+				material.updateUniformBlock('MainBlock');
+				part.mesh.draw();
+			}
+		}
+	}
+
+	// Transform the model's local tower-leg footprints into WORLD space by the SAME placement the
+	// renderer uses (translate(anchor + offset) · yaw · scale, minus the origin-relative shift, since
+	// collision works in absolute coords) and register them height-gated at the deck level, so they
+	// track the live placement sliders. Clears them when the model is off / not loaded.
+	private syncBridgeModelFootprints(corridor: BridgeCorridor | undefined, model: BridgeModelObject): void {
+		if (!corridor || !corridor.modelEnabled || !corridor.modelAnchor || model.legFootprints.length === 0) {
+			buildingCollisionRegistry.setModelFootprints([]);
+			return;
+		}
+
 		const scale = corridor.modelScale ?? 1;
 		const stretch = corridor.modelStretch ?? 1;
 		const yaw = corridor.modelYaw ?? 0;
 		const [ax, az] = corridor.modelAnchor;
 
-		// translate(anchor - origin + offset) * yaw * scale, applied to the origin-centered mesh.
-		let bridgeMatrix = Mat4.identity();
-		bridgeMatrix = Mat4.translate(
-			bridgeMatrix,
-			ax - instancesOrigin.x + (corridor.modelOffsetX ?? 0),
-			corridor.modelOffsetY ?? 0,
-			az - instancesOrigin.y + (corridor.modelOffsetZ ?? 0)
-		);
-		bridgeMatrix = Mat4.yRotate(bridgeMatrix, yaw);
-		bridgeMatrix = Mat4.scale(bridgeMatrix, scale * stretch, scale, scale);
+		let m = Mat4.identity();
+		m = Mat4.translate(m, ax + (corridor.modelOffsetX ?? 0), corridor.modelOffsetY ?? 0, az + (corridor.modelOffsetZ ?? 0));
+		m = Mat4.yRotate(m, yaw);
+		m = Mat4.scale(m, scale * stretch, scale, scale);
 
-		model.position.set(instancesOrigin.x, 0, instancesOrigin.y);
-		model.updateMatrix();
-		model.updateMatrixWorld();
+		const yMin = (corridor.deckHeight ?? 0) - BridgeTowerCollisionYBand;
 
-		const material = this.carMaterial;
-		const mvMatrixPrev = Mat4.multiply(this.cameraMatrixWorldInversePrev, model.matrixWorld);
-		const prev = this.bridgeModelMatrixPrev ?? bridgeMatrix;
+		const entries: ModelFootprint[] = model.legFootprints.map(poly => {
+			const world = poly.map(p => {
+				const v = Vec3.applyMatrix4(new Vec3(p.x, 0, p.z), m);
+				return {x: v.x, z: v.z};
+			});
+			return {polygon: world, aabb: polygonAABB(world), yMin};
+		});
 
-		this.renderer.useMaterial(material);
-
-		material.getUniform('projectionMatrix', 'MainBlock').value = new Float32Array(camera.jitteredProjectionMatrix.values);
-		material.getUniform('modelMatrix', 'MainBlock').value = new Float32Array(model.matrixWorld.values);
-		material.getUniform('viewMatrix', 'MainBlock').value = new Float32Array(camera.matrixWorldInverse.values);
-		material.getUniform('modelViewMatrixPrev', 'MainBlock').value = new Float32Array(mvMatrixPrev.values);
-		material.getUniform('carMatrix', 'MainBlock').value = new Float32Array(bridgeMatrix.values);
-		material.getUniform('carMatrixPrev', 'MainBlock').value = new Float32Array(prev.values);
-		material.updateUniformBlock('MainBlock');
-
-		model.mesh.draw();
-
-		this.bridgeModelMatrixPrev = bridgeMatrix;
+		buildingCollisionRegistry.setModelFootprints(entries);
 	}
 
 	private writeToObjectIdBuffer(): void {
@@ -809,6 +1205,9 @@ export default class GBufferPass extends Pass<{
 		this.renderInstances(instancesOrigin);
 		this.renderDeck(instancesOrigin);
 		this.renderBridgeModel(instancesOrigin);
+		this.renderWorldTreeScatter(instancesOrigin);
+		this.renderModelBuildingScatter(instancesOrigin);
+		this.renderCollisionDebug(instancesOrigin);
 		this.renderCar(instancesOrigin);
 		this.writeToObjectIdBuffer();
 

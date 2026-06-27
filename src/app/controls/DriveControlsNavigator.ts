@@ -7,6 +7,9 @@ import TerrainHeightProvider from "~/app/terrain/TerrainHeightProvider";
 import {CarWheelOffsetX, CarWheelOffsetZ, WheelRadius} from "~/app/objects/models/CarModel";
 import {bridgeRegistry} from "~/app/bridge/BridgeRegistry";
 import {selectSupport, stepFall} from "~/app/bridge/DriveVertical";
+import {buildingCollisionRegistry} from "~/app/collision/BuildingCollisionRegistry";
+import {worldTreeScatterState} from "~/app/objects/models/worldTreeScatterState";
+import {placedBuildingsState} from "~/app/objects/models/placedBuildingsState";
 
 // Strata Phase 2, Step 1 — THROWAWAY PROTOTYPE GLUE.
 // A logical arcade car pose (x, z, heading, speed) driven with WASD that rides the
@@ -68,6 +71,17 @@ const BoostLeanBack = MathUtils.toRad(2.5); // extra nose-up the body holds whil
 // the DEM, so the car is always grounded and gravity never triggers (open-world feel untouched).
 // The pure math lives in src/app/bridge/DriveVertical.ts (selectSupport + stepFall).
 const Gravity = 55;          // world-height units / s^2 — a fall from deck height (~73) lands in ~1.6s. Tune for feel.
+
+// THROWAWAY PROBE (s9 physics) — diagnose the hill basketball-bounce + high-speed ramp tunneling.
+// Logs per-frame vertical state (throttled) whenever the car is fast, airborne, or there's a big
+// vertical gap between the car and the support surface (a tunneling candidate). Toggle live with KeyP
+// so it's silent until armed. DELETE this + its fields/log/key after we've read the numbers.
+const ProbePhysics = true;
+
+// Building wall collision (physics spike). The car is treated as a circle (radius =
+// buildingCollisionRegistry.radius, a live dev-panel tunable) in the XZ plane; after each move it's
+// pushed out of any overlapping building footprint (slide-along). Gated by
+// buildingCollisionRegistry.enabled (toggle KeyB), default OFF so open-world roaming is untouched.
 const DeckAttachBand = 2.0;  // how near (units) the car must be to the deck to climb ON from the ground; small so you only attach at the ramp ends (deck ≈ ground), never under the high span
 const DeckDetachDrop = 1.5;  // how far the car may drop below the deck before it detaches (drives off the edge) — hysteresis vs suspension bumps
 
@@ -163,6 +177,12 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 	// onDeck = attached to the elevated bridge deck this frame (hysteresis state for selectSupport).
 	private vy: number = 0;
 	private onDeck: boolean = false;
+
+	// THROWAWAY PROBE state (s9). probePenetration = the convex-crest plane-raise from
+	// sampleGroundHeight (a prime bounce suspect); probeAccum throttles the log; probeOn armed by KeyP.
+	private probePenetration: number = 0;
+	private probeAccum: number = 0;
+	private probeOn: boolean = true; // auto-armed; KeyP toggles OFF if the console gets noisy
 	private bodyY: number = 0;
 	private bodyYVel: number = 0;
 	private bodyPitchVel: number = 0;
@@ -392,6 +412,7 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 		);
 		yBase += Math.min(penetration, MaxChassisLift) + RideHeightClearance;
 		this.yTerrain = yBase;
+		this.probePenetration = penetration; // THROWAWAY PROBE (s9)
 
 		// Per-wheel suspension travel = each wheel's actual ground minus the (now raised) plane at
 		// that wheel — mostly DROOP, so the tires reach back down to the ground while the body
@@ -452,10 +473,34 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 				// Toggle course mode ("bowling-lane bumpers"): bridge decks become drivable.
 				bridgeRegistry.courseMode = !bridgeRegistry.courseMode;
 				break;
+			case 'KeyB':
+				// Toggle building wall collision (physics spike). OFF = free-roam through buildings as
+				// today; ON = the car can't drive through them (slides along the walls).
+				buildingCollisionRegistry.enabled = !buildingCollisionRegistry.enabled;
+				console.log(`[Strata] building collision ${buildingCollisionRegistry.enabled ? 'ON' : 'OFF'}`);
+				break;
 			case 'KeyR':
 				// Recover: re-plant the car upright on the surface beneath it (after a fall / awkward
 				// landing off the deck). Snaps the tires back to the ground.
 				this.recoverToGround();
+				break;
+			case 'KeyP':
+				// THROWAWAY PROBE (s9): arm/disarm the vertical-physics logging.
+				this.probeOn = !this.probeOn;
+				console.log(`[probe] physics logging ${this.probeOn ? 'ON' : 'OFF'}`);
+				break;
+			case 'KeyT':
+				// Toggle the world-wide model-tree scatter (s11). ON (default) = the new realistic trees
+				// render over the OSM forests near the camera, mixed with the engine billboards; OFF =
+				// billboards only.
+				worldTreeScatterState.enabled = !worldTreeScatterState.enabled;
+				console.log(`[Strata] world tree scatter ${worldTreeScatterState.enabled ? 'ON' : 'OFF'}`);
+				break;
+			case 'KeyU':
+				// Strata Lane B (s13) — toggle the PROCEDURAL model-building city: near-camera tiles get
+				// kit buildings fitted to real OSM footprints, the original extrusions hidden (B3).
+				placedBuildingsState.enabled = !placedBuildingsState.enabled;
+				console.log(`[Strata] model buildings ${placedBuildingsState.enabled ? 'ON' : 'OFF'}`);
 				break;
 		}
 	}
@@ -651,6 +696,16 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 		this.x += forward.x * this.speed * deltaTime;
 		this.z += forward.z * this.speed * deltaTime;
 
+		// Building wall collision (physics spike, gated): push the car out of any footprint it just
+		// drove into, sliding along the wall. Velocity is untouched — re-projecting each frame IS the
+		// slide. OFF by default (open-world roaming unchanged) until toggled with KeyB. The collision
+		// radius is a live dev-panel tunable on the registry.
+		if (buildingCollisionRegistry.enabled) {
+			const corrected = buildingCollisionRegistry.resolve(this.x, this.z, this.y);
+			this.x = corrected.x;
+			this.z = corrected.z;
+		}
+
 		this.sampleGroundHeight();
 	}
 
@@ -690,11 +745,30 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 		// exactly as before. When the support drops away — driving off the deck edge — the car FALLS
 		// under gravity until it catches the ground beneath. Always on; off a corridor yTerrain is the
 		// DEM and the car is always grounded, so this is a no-op for open-world driving.
+		const yBeforeFall = this.y; // THROWAWAY PROBE (s9)
 		const fall = stepFall(this.y, this.vy, this.yTerrain, Gravity, dt);
 		this.y = fall.y;
 		this.vy = fall.vy;
 		this.pitch = this.pitchTerrain;
 		this.roll = this.rollTerrain;
+
+		// THROWAWAY PROBE (s9): throttled per-frame vertical state, only when fast / airborne / a big
+		// vertical gap exists between the car and the support (a tunneling candidate). Armed by KeyP.
+		if (ProbePhysics && this.probeOn) {
+			this.probeAccum += dt;
+			const airborne = yBeforeFall > this.yTerrain + 0.02;
+			const gap = yBeforeFall - this.yTerrain; // <0 = support rose ABOVE the car (steep climb/ramp)
+			const tunnelCandidate = Math.abs(gap) > 0.5;
+			if (this.probeAccum >= 0.1 && (Math.abs(this.speed) > 8 || airborne || tunnelCandidate)) {
+				this.probeAccum = 0;
+				console.log(
+					`[probe] spd=${this.speed.toFixed(1)} yT=${this.yTerrain.toFixed(2)} ` +
+					`y=${this.y.toFixed(2)} vy=${this.vy.toFixed(2)} gap=${gap.toFixed(2)} ` +
+					`pen=${this.probePenetration.toFixed(2)} bodyY=${this.bodyY.toFixed(2)} ` +
+					`onDeck=${this.onDeck} air=${airborne}`
+				);
+			}
+		}
 
 		const stiffness = SuspensionFreq * SuspensionFreq;
 		const damping = 2 * SuspensionDamping * SuspensionFreq;

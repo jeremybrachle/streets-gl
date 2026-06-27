@@ -20,6 +20,7 @@ import {
 import InstancedObject from "~/app/objects/InstancedObject";
 import TerrainMask from "~/app/objects/TerrainMask";
 import EventEmitter from "~/app/EventEmitter";
+import {AABB2D, Polygon2D, footprintHullFromBuffer} from "~/app/collision/FootprintCollision";
 
 export type InstanceBufferInterleaved = Float32Array;
 
@@ -36,6 +37,10 @@ export type TileInstanceBuffers = Map<Tile3DInstanceType, {
 
 export default class Tile extends Object3D {
 	private static counter = 0;
+	// Below this extrusion height (m) a feature is treated as a flat decal (roof/pavement), not a
+	// wall, and gets no collision footprint. The probe saw real buildings at 5–287m and flat
+	// features at ~0m, so a low cutoff cleanly separates them.
+	private static readonly MinWallHeight = 1.5;
 
 	public readonly x: number;
 	public readonly y: number;
@@ -49,6 +54,10 @@ export default class Tile extends Object3D {
 	public readonly buildingPackedToLocalMap: Map<number, number> = new Map();
 	public readonly buildingOffsetMap: Map<number, [number, number]> = new Map();
 	public readonly buildingVisibilityMap: Map<number, boolean> = new Map();
+	// Strata physics spike — per-building footprint (tile-LOCAL XZ meters), packedId → convex hull +
+	// broad-phase AABB. Computed from the extruded position buffer at load; flat (height-0) features
+	// are excluded. TileObjectsSystem translates these to world space for buildingCollisionRegistry.
+	public readonly buildingFootprints: Map<number, {polygon: Polygon2D; aabb: AABB2D; height: number; baseY: number}> = new Map();
 
 	public inFrustum: boolean = true;
 	public distanceToCamera: number = null;
@@ -224,8 +233,17 @@ export default class Tile extends Object3D {
 			const nextOffset = offsets[i / 2 + 1] || vertexCount;
 			this.buildingLocalToPackedMap.set(i / 2, packedId);
 			this.buildingPackedToLocalMap.set(packedId, i / 2);
-			this.buildingOffsetMap.set(packedId, [offset, nextOffset - offset]);
+			const count = nextOffset - offset;
+			this.buildingOffsetMap.set(packedId, [offset, count]);
 			this.buildingVisibilityMap.set(packedId, true);
+
+			// Footprint for wall collision — a tight convex hull (not a world-axis AABB, which balloons
+			// on SF's rotated grid). Skip flat (<MinWallHeight) features so roofs/pavement polygons that
+			// share this buffer don't become invisible walls.
+			const footprint = footprintHullFromBuffer(extrudedBuffers.positionBuffer, offset, count, Tile.MinWallHeight);
+			if (footprint) {
+				this.buildingFootprints.set(packedId, footprint);
+			}
 		}
 	}
 

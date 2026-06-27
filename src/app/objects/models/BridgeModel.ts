@@ -3,6 +3,7 @@ import Vec3 from "~/lib/math/Vec3";
 import AABB3D from "~/lib/math/AABB3D";
 import ResourceLoader from "~/app/world/ResourceLoader";
 import {CarModelBuffers} from "~/app/objects/models/CarModel";
+import {Polygon2D, extractTowerLegFootprints} from "~/app/collision/towerFootprints";
 
 // Strata Lane B Increment 9 — the Golden Gate hero MODEL (CC-BY "San Francisco Bridge" by rendorshen,
 // product branch only). A decoupled VISUAL prop: the analytic deck (BridgeDeck) stays the drivable
@@ -17,6 +18,8 @@ export interface BridgeModel {
 	buffers: CarModelBuffers;
 	/** Longest horizontal extent (local +X) after normalization — the span axis length in model units. */
 	spanUnits: number;
+	/** Tower-leg footprints (model-local XZ convex polygons) for collision — see extractTowerLegFootprints. */
+	legFootprints: Polygon2D[];
 }
 
 function resolve<T>(coll: T[], v: T | number): T {
@@ -162,5 +165,9 @@ export function createBridgeModelFromGLB(): BridgeModel {
 		boundingBox: new AABB3D(new Vec3(nminx, nminy, nminz), new Vec3(nmaxx, nmaxy, nmaxz))
 	};
 
-	return {buffers, spanUnits: nmaxx - nminx};
+	// Tower leg footprints (model-local XZ) for collision — the two towers are dense, full-height
+	// vertex clusters; each splits into two legs straddling the roadway, so the car drives between them.
+	const legFootprints = extractTowerLegFootprints(pos);
+
+	return {buffers, spanUnits: nmaxx - nminx, legFootprints};
 }

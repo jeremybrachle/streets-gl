@@ -3,6 +3,8 @@ import Tile from "../objects/Tile";
 import TileBuilding from "../world/TileBuilding";
 import System from "../System";
 import {hiddenBuildingsRegistry} from "../world/HiddenBuildingsRegistry";
+import {buildingCollisionRegistry, FootprintEntry} from "../collision/BuildingCollisionRegistry";
+import {translateAABB, translatePolygon} from "../collision/FootprintCollision";
 
 export default class TileObjectsSystem extends System {
 	private buildingsList: Map<number, TileBuilding> = new Map();
@@ -32,6 +34,18 @@ export default class TileObjectsSystem extends System {
 				tile.hideBuilding(packedId);
 			}
 		}
+
+		// Strata physics spike: register this tile's building footprints (translated to world space)
+		// for wall collision. Hidden buildings are filtered at query time in the registry.
+		const entries: FootprintEntry[] = [];
+		for (const [packedId, local] of tile.buildingFootprints) {
+			entries.push({
+				packedId,
+				aabb: translateAABB(local.aabb, tile.position.x, tile.position.z),
+				polygon: translatePolygon(local.polygon, tile.position.x, tile.position.z),
+			});
+		}
+		buildingCollisionRegistry.setTile(tile.localId, entries);
 	}
 
 	// Strata: hide a building NOW on its current holder tile (instant — patches the display buffer, no
@@ -53,6 +67,7 @@ export default class TileObjectsSystem extends System {
 
 	public removeTile(tile: Tile): void {
 		this.activeTiles.delete(tile);
+		buildingCollisionRegistry.removeTile(tile.localId);
 
 		if (!tile.buildingOffsetMap) {
 			return;

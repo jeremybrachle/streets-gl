@@ -95,6 +95,20 @@ export default class VectorPolylineHandler implements Handler {
 	private handlePath(): Tile3DFeature[] {
 		const features: Tile3DFeature[] = [];
 
+		// [STRATA-DBG] TEMPORARY — remove after the Bay Bridge flat-road investigation (s16).
+		// Logs whether the two Bay West-span carriageways (8921938, 661905446) and the GGB east
+		// carriageway (537838948, control) actually reach handlePath and get suppressed here.
+		const STRATA_DBG_WATCH = new Set<number>([8921938, 661905446, 537838948]);
+		if (this.osmReference && STRATA_DBG_WATCH.has(this.osmReference.id)) {
+			// eslint-disable-next-line no-console
+			console.log('[STRATA-DBG] handlePath', {
+				id: this.osmReference.id,
+				osmType: this.osmReference.type,
+				pathType: this.descriptor.pathType,
+				suppressed: isDeckedBridgeWay(this.osmReference)
+			});
+		}
+
 		// A bridge we draw our own elevated deck for: skip the flat draped roadway so it doesn't show
 		// as a phantom road beneath the deck. The road stays in the RoadGraph (registered in
 		// setRoadGraph) so approach roads still trim/connect to it.

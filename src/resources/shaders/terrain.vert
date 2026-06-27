@@ -35,6 +35,7 @@ uniform PerMaterial {
 	vec2 biomeCoordinates;
 	float time;
 	vec2 usageRange;
+	float detailScale;
 };
 
 uniform sampler2DArray tRingHeight;

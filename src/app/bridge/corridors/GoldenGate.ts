@@ -29,22 +29,22 @@ export const GOLDEN_GATE_CORRIDOR: BridgeCorridor = {
 	centerline: CENTERLINE,
 	// Defaults below = the values the user tuned live as the best fit that clears the terrain without
 	// digging in. Still adjustable in the panel; Reset restores these.
-	halfWidth: 35,    // mercator m lateral reach from the centerline (user-tuned 2026-06-24 — wider deck)
-	deckHeight: 73,   // height of the flat span over the water
+	halfWidth: 17,    // mercator m lateral reach from the centerline (user-tuned 2026-06-25)
+	deckHeight: 106,  // height of the flat span over the water (user-tuned 2026-06-25)
 	rampLength: 600,  // approach ramp reach onto the land (clamped per-side to the approach length)
 	maxGrade: 0.02,   // 2% — gentle ramps (auto-extends toward this, capped by the approach length)
 	spanStart: arcLengthAtNode(CENTERLINE, 15),
 	spanEnd: arcLengthAtNode(CENTERLINE, 16),
 
 	// Visual hero model (CC-BY GGB GLB) — decoupled decoration over the drivable deck. Transform below =
-	// the values the user dialled in live via the Bridge panel (2026-06-24) so the model sits on the
+	// the values the user dialled in live via the Bridge panel (2026-06-25) so the model sits on the
 	// deck (the GLB is stylized, so it's NOT 1:1 — some legs sit under the water). Reset restores these.
 	modelEnabled: true,
 	modelAnchor: SPAN_MID,
-	modelScale: 3.5,
-	modelStretch: 1.05,
+	modelScale: 1.5,
+	modelStretch: 2.5,
 	modelYaw: -3.05,
 	modelOffsetX: -55,
-	modelOffsetY: 136,
-	modelOffsetZ: 0,
+	modelOffsetY: 133,
+	modelOffsetZ: 6,
 };
