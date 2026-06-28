@@ -15,6 +15,8 @@ import ControlsSystem, {NavigationMode} from "~/app/systems/ControlsSystem";
 import Tile3DBuffers from "~/lib/tile-processing/tile3d/buffers/Tile3DBuffers";
 import SettingsSystem from "~/app/systems/SettingsSystem";
 import {editableRoadRegistry} from "~/app/roadcompiler/EditableRoadRegistry";
+import {roadHeightEditRegistry} from "~/app/roadcompiler/RoadHeightEditRegistry";
+import MapWorkerSystem from "~/app/systems/MapWorkerSystem";
 
 interface QueueItem {
 	position: Vec2;
@@ -33,6 +35,25 @@ export default class TileSystem extends System {
 		this.objectsManager = this.systemManager.getSystem(TileObjectsSystem);
 		this.listenToSettings();
 		this.listenToKeyPresses();
+		this.listenToRoadHeightEdits();
+	}
+
+	// Road-compiler (Checkpoint ③ step 3, ghost suppression — approach A): when a way FIRST gains or
+	// loses a height edit, broadcast the new edited-way set to the tile workers and re-decode the tiles
+	// holding that way. removeTile drops them; the frustum pass (updateTiles) re-adds any still in view
+	// next frame, now decoded with the worker suppressing that way's flat draped roadway — so the lifted
+	// ribbon has no ghost road underneath. Brief re-mesh flicker on the first raise (accepted).
+	private listenToRoadHeightEdits(): void {
+		roadHeightEditRegistry.onEditedWaysChanged = (editedWayIds, changedWayId): void => {
+			this.systemManager.getSystem(MapWorkerSystem).setEditedWays(editedWayIds);
+
+			for (const key of editableRoadRegistry.tilesContainingWay(changedWayId)) {
+				const [x, y] = key.split(',').map(Number);
+				if (this.getTile(x, y)) {
+					this.removeTile(x, y);
+				}
+			}
+		};
 	}
 
 	private listenToKeyPresses(): void {

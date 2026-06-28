@@ -145,6 +145,26 @@ export function deckHeightAt(
 		return null;
 	}
 
+	return deckHeightFromS(corridor, s, totalLength, groundY);
+}
+
+/**
+ * The deck-height LAW as a pure function of arc-length `s` along the corridor — no projection. This is
+ * the shared primitive `deckHeightAt` is built on: the car's query reaches it by projecting an arbitrary
+ * (x, z) onto the centerline (above); a renderer that already walks the centerline by CUMULATIVE
+ * arc-length calls this directly with that `s`. Calling this directly avoids the per-vertex re-projection
+ * that — where a path nears itself — assigns a non-monotonic `s` and folds the lifted ribbon.
+ *
+ * `totalLength` is the corridor's full arc length (so the ramps land at its two ends); `groundY` is the
+ * DEM the ramps blend down to. Returns null only inside a declared span beyond the ramp foot (the land
+ * approach stays normal ground road); the whole-corridor profile is non-null at every `s` in [0, total].
+ */
+export function deckHeightFromS(
+	corridor: BridgeCorridor,
+	s: number,
+	totalLength: number,
+	groundY: number
+): number | null {
 	const dh = corridor.deckHeight - groundY;
 	const gradeRamp = corridor.maxGrade > 0 ? (SMOOTHSTEP_MAX_SLOPE * Math.abs(dh)) / corridor.maxGrade : 0;
 

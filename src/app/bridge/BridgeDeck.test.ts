@@ -1,4 +1,4 @@
-import {BridgeCorridor, deckHeightAt, projectPointToPolyline, arcLengthAtNode} from "./BridgeDeck";
+import {BridgeCorridor, deckHeightAt, deckHeightFromS, projectPointToPolyline, arcLengthAtNode} from "./BridgeDeck";
 
 // A straight 300m corridor along +x, deck 20 high. rampLength 10 is intentionally TOO SHORT
 // for maxGrade 0.5 (needs 1.5*20/0.5 = 60m), so the ramp must auto-extend to 60m each end.
@@ -118,6 +118,45 @@ describe("deckHeightAt — ramp contract", () => {
 		const high = 50;
 		expect(deckHeightAt(STRAIGHT, 0, 0, high)).toBeCloseTo(high, 6);
 		expect(deckHeightAt(STRAIGHT, 150, 0, high)).toBeCloseTo(20, 6);
+	});
+});
+
+describe("deckHeightFromS — the shared height law (deckHeightAt minus the projection)", () => {
+	// deckHeightAt is exactly: project (x,z) -> {s, lateral, totalLength}, lateral gate, then
+	// deckHeightFromS(corridor, s, totalLength, groundY). On the centerline (lateral 0) s == x and
+	// totalLength == the corridor length, so the two must agree everywhere.
+	test("equals deckHeightAt along the STRAIGHT corridor (no re-projection drift)", () => {
+		for (let x = 0; x <= 300; x += 5) {
+			const viaProject = deckHeightAt(STRAIGHT, x, 0, GROUND);
+			const viaS = deckHeightFromS(STRAIGHT, x, 300, GROUND);
+			expect(viaS).toBeCloseTo(viaProject!, 9);
+		}
+	});
+
+	test("equals deckHeightAt along the declared-span corridor, nulls included", () => {
+		const SPAN: BridgeCorridor = {
+			centerline: [[0, 0], [600, 0]],
+			halfWidth: 5, deckHeight: 30, rampLength: 100, maxGrade: 1,
+			spanStart: 200, spanEnd: 400,
+		};
+		for (let x = 0; x <= 600; x += 5) {
+			const viaS = deckHeightFromS(SPAN, x, 600, 0);
+			const viaProject = deckHeightAt(SPAN, x, 0, 0);
+			if (viaProject === null) {
+				expect(viaS).toBeNull();
+			} else {
+				// projectPointToPolyline's s differs from the exact x by a last-ULP rounding, so the
+				// blended ramp values agree only to floating precision (not bit-identical).
+				expect(viaS).toBeCloseTo(viaProject, 9);
+			}
+		}
+	});
+
+	test("flat span and ramp feet at known arc-lengths (direct, no projection)", () => {
+		expect(deckHeightFromS(STRAIGHT, 150, 300, GROUND)).toBeCloseTo(20, 6); // mid deck
+		expect(deckHeightFromS(STRAIGHT, 0, 300, GROUND)).toBeCloseTo(GROUND, 6); // start foot
+		expect(deckHeightFromS(STRAIGHT, 300, 300, GROUND)).toBeCloseTo(GROUND, 6); // end foot
+		expect(deckHeightFromS(STRAIGHT, EXPECTED_RAMP, 300, GROUND)).toBeCloseTo(20, 6); // ramp top
 	});
 });
 

@@ -3,7 +3,9 @@ import AbstractMesh from "~/lib/renderer/abstract-renderer/AbstractMesh";
 import AbstractRenderer from "~/lib/renderer/abstract-renderer/AbstractRenderer";
 import {RendererTypes} from "~/lib/renderer/RendererTypes";
 import Vec3 from "~/lib/math/Vec3";
-import {editableRoadRegistry} from "~/app/roadcompiler/EditableRoadRegistry";
+import {editableRoadRegistry, stitchCenterlines} from "~/app/roadcompiler/EditableRoadRegistry";
+import {roadHeightEditRegistry} from "~/app/roadcompiler/RoadHeightEditRegistry";
+import {BridgeCorridor, deckHeightFromS} from "~/app/bridge/BridgeDeck";
 
 // Strata Checkpoint ③ (step 2b) — the VISIBLE selection highlight for the road-height editor. A
 // RenderableObject3D whose mesh is a flat coloured ribbon laid along the selected road's centerline(s),
@@ -18,6 +20,13 @@ const RibbonLift = 0.6;          // m above the ground so the highlight reads ov
 const RibbonHalfWidth = 6;       // m to each side of the centerline — a clearly visible band
 const RibbonColor = [60, 235, 120]; // bright green
 
+// Step 3 — when the selected way has a height edit, its ribbon is lifted to that height with smooth,
+// grade-limited ramps down to terrain at the way's two ends (reusing deckHeightAt's flat-span-plus-
+// ramp profile — the "auto-stretching ascent/descent"). These shape that ramp; the editor sets only
+// the height, the ramps emerge.
+const EditRampLength = 60;       // m: desired ramp blend length at each end (auto-extends to honor grade)
+const EditMaxGrade = 0.08;       // max |rise/run| on the ramps
+
 export default class SelectionRibbonMesh extends RenderableObject3D {
 	public mesh: AbstractMesh = null;
 
@@ -27,6 +36,9 @@ export default class SelectionRibbonMesh extends RenderableObject3D {
 	// The way + registry revision the current mesh was built for; -1 forces a first build.
 	private builtRevision = -1;
 	private builtWayId: number | null = null;
+	// The height-edit registry revision the mesh was built for, so setting/changing the edited height
+	// (which lives in a separate registry) rebuilds the ribbon at the new lifted profile.
+	private builtHeightRevision = -1;
 	// False while a vertex sampled the DEM before its tile loaded — keep rebuilding until terrain is real.
 	private complete = false;
 
@@ -46,6 +58,7 @@ export default class SelectionRibbonMesh extends RenderableObject3D {
 		const changed =
 			this.builtRevision !== editableRoadRegistry.revision ||
 			this.builtWayId !== editableRoadRegistry.selectedWayId ||
+			this.builtHeightRevision !== roadHeightEditRegistry.revision ||
 			!this.complete;
 
 		if (!changed) {
@@ -55,6 +68,7 @@ export default class SelectionRibbonMesh extends RenderableObject3D {
 		this.rebuild(renderer, groundAt);
 		this.builtRevision = editableRoadRegistry.revision;
 		this.builtWayId = editableRoadRegistry.selectedWayId;
+		this.builtHeightRevision = roadHeightEditRegistry.revision;
 	}
 
 	private rebuild(renderer: AbstractRenderer, groundAt: (x: number, z: number) => number | null): void {
@@ -63,49 +77,83 @@ export default class SelectionRibbonMesh extends RenderableObject3D {
 			this.mesh = null;
 		}
 
-		const centerlines = editableRoadRegistry.selectedCenterlines();
+		const wayId = editableRoadRegistry.selectedWayId;
+		const segments = editableRoadRegistry.selectedCenterlines();
 
-		if (centerlines.length === 0) {
+		if (wayId === null || segments.length === 0) {
 			this.complete = true; // nothing selected — nothing to wait on
 			return;
 		}
 
-		this.anchor = [centerlines[0].centerline[0][0], centerlines[0].centerline[0][1]];
+		// Stitch the way's per-tile segments into ORDERED CONNECTED PIECES. A clean way is one piece;
+		// genuinely disjoint runs stay separate (no spurious span bridging a gap = no fold). Each piece is
+		// lifted independently so its ramps land at THAT piece's two real ends, never at a tile seam.
+		const pieces = stitchCenterlines(segments.map(s => s.centerline)).filter(p => p.length >= 2);
+		if (pieces.length === 0) {
+			this.complete = true;
+			return;
+		}
+
+		this.anchor = [pieces[0][0][0], pieces[0][0][1]];
+
+		// If the way has a height edit, lift each piece to that height via the shared deck-height law
+		// (flat span + grade-limited ramps down to terrain at the ends); otherwise lay it flat just over
+		// the terrain like the plain selection highlight.
+		const editedHeight = roadHeightEditRegistry.heightFor(wayId);
 
 		const position: number[] = [];
 		const normal: number[] = [];
 		const color: number[] = [];
 		let complete = true;
 
-		for (const {centerline} of centerlines) {
-			if (centerline.length < 2) {
-				continue;
+		for (const line of pieces) {
+			// Walk the piece by CUMULATIVE arc-length and evaluate the height law at that s directly — no
+			// per-vertex re-projection (which, where a path nears itself, assigns a non-monotonic s and
+			// folds the ribbon). totalLength is this piece's length, so the ramps land at its two ends.
+			const ss: number[] = new Array(line.length);
+			ss[0] = 0;
+			for (let i = 1; i < line.length; i++) {
+				ss[i] = ss[i - 1] + Math.hypot(line[i][0] - line[i - 1][0], line[i][1] - line[i - 1][1]);
 			}
+			const totalLength = ss[line.length - 1];
 
-			// Sample the DEM at each centerline vertex; skip the whole segment if a tile isn't loaded yet
-			// (it reappears once the tile streams in and bumps the registry revision).
-			const ys: number[] = [];
-			let ok = true;
-			for (const [x, z] of centerline) {
+			const corridor: BridgeCorridor | null = editedHeight === null ? null : {
+				centerline: line,
+				halfWidth: RibbonHalfWidth,
+				deckHeight: editedHeight,
+				rampLength: EditRampLength,
+				maxGrade: EditMaxGrade,
+			};
+
+			// Per-vertex height. For an edited piece the ramps blend down to terrain at its ends; where
+			// terrain hasn't streamed in yet, hold at the edited height (or carry the last good height for
+			// the flat highlight) and mark incomplete so it rebuilds once the tile loads.
+			const ys: number[] = new Array(line.length);
+			let lastGood = editedHeight ?? 0;
+			for (let i = 0; i < line.length; i++) {
+				const [x, z] = line[i];
 				const g = groundAt(x, z);
 				if (g === null) {
-					ok = false;
-					break;
+					complete = false;
+				} else {
+					lastGood = g;
 				}
-				ys.push(g + RibbonLift);
-			}
-			if (!ok) {
-				complete = false;
-				continue;
+
+				if (corridor) {
+					const ground = g ?? corridor.deckHeight;
+					ys[i] = deckHeightFromS(corridor, ss[i], totalLength, ground) ?? ground;
+				} else {
+					ys[i] = (g ?? lastGood) + RibbonLift;
+				}
 			}
 
 			// Offset each vertex laterally by ±halfWidth (perpendicular to the local tangent) into a
 			// two-sided ribbon, then emit two triangles per segment.
 			const left: [number, number][] = [];
 			const right: [number, number][] = [];
-			for (let i = 0; i < centerline.length; i++) {
-				const prev = centerline[Math.max(0, i - 1)];
-				const next = centerline[Math.min(centerline.length - 1, i + 1)];
+			for (let i = 0; i < line.length; i++) {
+				const prev = line[Math.max(0, i - 1)];
+				const next = line[Math.min(line.length - 1, i + 1)];
 				let tx = next[0] - prev[0];
 				let tz = next[1] - prev[1];
 				const len = Math.hypot(tx, tz) || 1;
@@ -114,12 +162,12 @@ export default class SelectionRibbonMesh extends RenderableObject3D {
 				// Perpendicular in the [x, z] plane.
 				const px = -tz;
 				const pz = tx;
-				const [cx, cz] = centerline[i];
+				const [cx, cz] = line[i];
 				left.push([cx + px * RibbonHalfWidth, cz + pz * RibbonHalfWidth]);
 				right.push([cx - px * RibbonHalfWidth, cz - pz * RibbonHalfWidth]);
 			}
 
-			for (let i = 0; i < centerline.length - 1; i++) {
+			for (let i = 0; i < line.length - 1; i++) {
 				const verts: [[number, number], number][] = [
 					[left[i], ys[i]], [right[i], ys[i]], [right[i + 1], ys[i + 1]],
 					[left[i], ys[i]], [right[i + 1], ys[i + 1]], [left[i + 1], ys[i + 1]],

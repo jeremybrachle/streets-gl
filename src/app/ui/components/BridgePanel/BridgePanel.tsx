@@ -11,7 +11,7 @@ import Config from "~/app/Config";
 // text parses to a finite number. NOT range-clamped — you can type a value past the slider's min/max
 // (the whole point: the sliders can't reach the exact value the user wants). Enter / blur returns
 // focus to the canvas so WASD driving resumes (same intent as the sliders' onPointerUp blur).
-const NumberField: React.FC<{
+export const NumberField: React.FC<{
 	value: number;
 	digits: number;
 	step: number;

@@ -5,6 +5,7 @@ import Tile3DBuffers from "~/lib/tile-processing/tile3d/buffers/Tile3DBuffers";
 import {getTile3DBuffersTransferables} from "~/lib/tile-processing/tile3d/utils";
 import MathUtils from "~/lib/math/MathUtils";
 import {SkeletonBuilder} from 'straight-skeleton';
+import {setEditedWayIds} from "~/app/roadcompiler/editedWaysWorkerState";
 
 const ctx: Worker = self as any;
 
@@ -19,12 +20,20 @@ class WorkerInstance {
 
 	private addEventListeners(): void {
 		ctx.addEventListener('message', async event => {
+			const data = event.data as WorkerMessage.ToWorker;
+
+			// Road-compiler (Checkpoint ③ step 3): update the height-edited way set first, before any
+			// skeleton init / tile decode, so subsequent tile Start messages decode with it applied.
+			if (data.type === WorkerMessage.ToWorkerType.SetEditedWays) {
+				setEditedWayIds(data.editedWayIds ?? []);
+				return;
+			}
+
 			if (!this.straightSkeletonReady) {
 				await SkeletonBuilder.init();
 				this.straightSkeletonReady = true;
 			}
 
-			const data = event.data as WorkerMessage.ToWorker;
 			const x = data.tile[0];
 			const y = data.tile[1];
 

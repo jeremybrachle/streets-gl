@@ -154,6 +154,18 @@ export class EditableRoadRegistry {
 		}
 		return this.allRoads().filter(r => r.osmWayId === this.selectedWayId);
 	}
+
+	/** Tile keys (`"x,y"`) that currently hold a segment of `osmWayId` — the tiles to re-decode when
+	 *  its height edit toggles, so the worker drops/re-adds its flat draped roadway (ghost suppression). */
+	public tilesContainingWay(osmWayId: number): string[] {
+		const out: string[] = [];
+		for (const [key, roads] of this.byTile) {
+			if (roads.some(r => r.osmWayId === osmWayId)) {
+				out.push(key);
+			}
+		}
+		return out;
+	}
 }
 
 /** Total length (m) of a polyline. */
@@ -188,6 +200,75 @@ export function pointAtArcLength(centerline: readonly [number, number][], s: num
 	}
 	const last = centerline[centerline.length - 1];
 	return [last[0], last[1]];
+}
+
+/**
+ * Stitch a way's per-tile centerline segments into ORDERED CONNECTED PIECES. A single OSM way that
+ * crosses a tile boundary arrives as several `EditableRoadCenterline` entries (one per tile); the
+ * height-edit profile (flat in the middle, grade-limited ramps down to terrain at the piece's TWO ends)
+ * needs each connected run as one line so the ramps land at its real ends, not at each tile seam.
+ *
+ * Returns an ARRAY of pieces. A clean way that's continuous across tiles yields a single piece; genuinely
+ * disjoint leftovers (a gap the tiles didn't cover) come back as SEPARATE pieces rather than being
+ * concatenated — concatenating them would draw a spurious straight span across the gap and fold the
+ * lifted ribbon. Each piece is rendered/ramped independently.
+ *
+ * Greedy endpoint chaining per piece: seed a chain from one segment, repeatedly attach the segment whose
+ * endpoint is within `tol` meters of the chain's head or tail (reversing as needed), dropping the shared
+ * boundary node. Boundary nodes from adjacent tiles map to the same world-mercator point (the D→E
+ * transform is continuous), so they coincide to floating precision. When nothing more connects, the piece
+ * is emitted and a new piece is seeded from the remaining segments. Pure; unit-tested.
+ */
+export function stitchCenterlines(
+	segments: readonly (readonly [number, number][])[],
+	tol = 1
+): [number, number][][] {
+	const remaining = segments.filter(s => s.length >= 1).map(s => s.map(p => [p[0], p[1]] as [number, number]));
+	const tol2 = tol * tol;
+	const near = (a: [number, number], b: [number, number]): boolean => {
+		const dx = a[0] - b[0];
+		const dz = a[1] - b[1];
+		return dx * dx + dz * dz <= tol2;
+	};
+
+	const pieces: [number, number][][] = [];
+
+	while (remaining.length > 0) {
+		let chain = remaining.shift() as [number, number][];
+
+		let progress = true;
+		while (remaining.length > 0 && progress) {
+			progress = false;
+			const head = chain[0];
+			const tail = chain[chain.length - 1];
+
+			for (let i = 0; i < remaining.length; i++) {
+				const seg = remaining[i];
+				const a = seg[0];
+				const b = seg[seg.length - 1];
+
+				if (near(tail, a)) {
+					chain = chain.concat(seg.slice(1));
+				} else if (near(tail, b)) {
+					chain = chain.concat(seg.slice(0, -1).reverse());
+				} else if (near(head, b)) {
+					chain = seg.slice(0, -1).concat(chain);
+				} else if (near(head, a)) {
+					chain = seg.slice(1).reverse().concat(chain);
+				} else {
+					continue;
+				}
+
+				remaining.splice(i, 1);
+				progress = true;
+				break;
+			}
+		}
+
+		pieces.push(chain);
+	}
+
+	return pieces;
 }
 
 /** The shared main-thread instance (mirrors `bridgeRegistry`): tiles feed it, the editor reads it. */

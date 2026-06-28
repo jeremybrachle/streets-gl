@@ -19,6 +19,25 @@
 		gap: 8px;
 	}
 
+	&__label {
+		min-width: 48px;
+	}
+
+	input[type="range"] {
+		flex: 1;
+		min-width: 80px;
+	}
+
+	input[type="number"] {
+		width: 56px;
+		background: rgba(255, 255, 255, 0.1);
+		color: #fff;
+		border: 1px solid rgba(255, 255, 255, 0.2);
+		border-radius: 4px;
+		padding: 2px 4px;
+		font-size: 12px;
+	}
+
 	&__hint {
 		opacity: 0.75;
 	}

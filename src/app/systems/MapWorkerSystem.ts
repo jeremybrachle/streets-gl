@@ -34,6 +34,14 @@ export default class MapWorkerSystem extends System {
 		}
 	}
 
+	/** Road-compiler (Checkpoint ③ step 3): broadcast the height-edited way-id set to every worker so
+	 *  each suppresses those ways' flat draped roadway at decode (ghost suppression, approach A). */
+	public setEditedWays(editedWayIds: number[]): void {
+		for (const worker of this.workers) {
+			worker.setEditedWays(editedWayIds);
+		}
+	}
+
 	public getFreeWorker(): MapWorker {
 		for (let i = 0; i < this.workers.length; i++) {
 			const worker = this.workers[i];

@@ -41,6 +41,16 @@ export default class MapWorker {
 		return promise;
 	}
 
+	/** Road-compiler (Checkpoint ③ step 3): tell this worker which way ids are height-edited so it
+	 *  suppresses their flat draped roadway at decode. Fire-and-forget (no per-tile response). */
+	public setEditedWays(editedWayIds: number[]): void {
+		this.sendMessage({
+			type: WorkerMessage.ToWorkerType.SetEditedWays,
+			tile: [0, 0],
+			editedWayIds
+		});
+	}
+
 	private sendMessage(msg: WorkerMessage.ToWorker, transferables: Transferable[] = []): void {
 		this.worker.postMessage(msg, transferables);
 	}

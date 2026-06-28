@@ -15,6 +15,7 @@ import Intersection, {IntersectionDirection} from "~/lib/road-graph/Intersection
 import {VectorAreaDescriptor, VectorPolylineDescriptor} from "~/lib/tile-processing/vector/qualifiers/descriptors";
 import {ProjectedTextures} from "~/lib/tile-processing/tile3d/textures";
 import {isDeckedBridgeWay} from "~/lib/tile-processing/tile3d/handlers/deckedBridges";
+import {isWayHeightEdited} from "~/app/roadcompiler/editedWaysWorkerState";
 import {isTilePathUnderCorridorSpan, tileVerticesToWorldMercator} from "~/app/bridge/CorridorSuppression";
 import {OSMReferenceType} from "~/lib/tile-processing/vector/features/OSMReference";
 import type {EditableRoadCenterline} from "~/app/roadcompiler/EditableRoadRegistry";
@@ -135,6 +136,15 @@ export default class VectorPolylineHandler implements Handler {
 		// as a phantom road beneath the deck. The road stays in the RoadGraph (registered in
 		// setRoadGraph) so approach roads still trim/connect to it.
 		if (isDeckedBridgeWay(this.osmReference)) {
+			return features;
+		}
+
+		// Road-compiler (Checkpoint ③ step 3, ghost suppression — approach A): a way the height editor
+		// has raised is drawn from the lifted ribbon, so skip its flat draped roadway here or it ghosts
+		// on the terrain under the raised section. The edited-way set is pushed to this worker via
+		// WorkerMessage.SetEditedWays; gated by the master editing flag.
+		const wayId = this.osmReference && this.osmReference.type === OSMReferenceType.Way ? this.osmReference.id : null;
+		if (Config.EditableRoadEditing && isWayHeightEdited(wayId)) {
 			return features;
 		}
 
