@@ -1,3 +1,4 @@
+import Vec2 from "~/lib/math/Vec2";
 import Vec3 from "~/lib/math/Vec3";
 import MathUtils from "~/lib/math/MathUtils";
 import URLControlsStateHandler from "../controls/URLControlsStateHandler";
@@ -279,6 +280,17 @@ export default class ControlsSystem extends System {
 
 	public getGroundControlsTarget(): Vec3 {
 		return this.groundNavigator.target;
+	}
+
+	// Strata Checkpoint ③ — project a screen point to the ground in the corridor/road frame (frame E),
+	// for the CPU road click-pick. Only valid in the orbit/map view (Ground mode), where editing
+	// happens; returns null otherwise so the picker stays inert while flying/driving/slippy.
+	public screenToGround(clientX: number, clientY: number): Vec2 | null {
+		if (this.mode !== NavigationMode.Ground || !this.groundNavigator) {
+			return null;
+		}
+
+		return this.groundNavigator.screenToGround(clientX, clientY);
 	}
 
 	// Strata Phase 2 Step 2 — throwaway glue: lets the renderer draw a placeholder

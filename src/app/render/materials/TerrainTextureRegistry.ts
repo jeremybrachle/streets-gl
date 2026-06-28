@@ -4,6 +4,8 @@
 // material's `tDetailMaps` slice-0 to the selected texture on the next frame. The default option is
 // the current s11 "aerial_grass_rock" grass so reverting is one click — nothing is removed.
 
+import Config from "~/app/Config";
+
 const STORAGE_KEY = 'strata.terrainTexture.v1';
 
 export interface TerrainTextureOption {
@@ -75,6 +77,16 @@ export class TerrainTextureRegistry {
 	public revision = 0;
 
 	public constructor() {
+		// Switcher parked (Config.TerrainTextureSwitcher = false): lock to the engine's ORIGINAL terrain
+		// — genericTerrainColor × the regional biome map, i.e. the look from before any terrain-texture
+		// work (the Poly Haven downloads, incl. the default option, are all post-original). Ignore any
+		// persisted choice so the original always applies; the saved value is left for a later re-enable.
+		// GBufferPass's constructor seeds the grass detail map, so we DO let sync run (revision 0 vs its
+		// -1) to swap it to the original on the first terrain frame.
+		if (!Config.TerrainTextureSwitcher) {
+			this.currentId = 'sgl_original';
+			return;
+		}
 		this.load();
 	}
 

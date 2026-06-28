@@ -54,6 +54,16 @@ const Config = {
 	// main-thread EditableRoadRegistry, plus the running total — a console proof that the worker→main
 	// centerline plumbing works before the click-pick UI lands. Throwaway diagnostic.
 	DebugLogEditableRoads: true,
+	// Checkpoint ③, step 2b: enable the road-height editor's CPU click-pick + selection highlight. In
+	// the orbit/map view (Ground mode) a click that doesn't hit a building projects to the ground and
+	// selects the nearest editable road centerline; the selection is shown in the road-editor panel and
+	// drawn as a highlight ribbon. Master gate for the editor interactions (off = stock building picking).
+	EditableRoadEditing: true,
+	// Live terrain base-texture switcher (s12). Parked for now (only one area can be edited and it
+	// distracts from the road editor) — off = the engine keeps its default ground (the pre-switcher
+	// look) and the dev panel hides the texture controls. Re-enable when the click-to-edit terrain
+	// workflow lands. When false the registry ignores any persisted override so the default applies.
+	TerrainTextureSwitcher: false,
 	SettingsSchema: {
 		fov: {
 			label: 'Vertical field of view',

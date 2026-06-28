@@ -1,0 +1,46 @@
+// Positioning + drag bar come from the DraggablePanel wrapper (bare variant); the dark glass is the
+// panel's own so the white text stays readable regardless of the app's light/dark theme. Mirrors
+// BridgePanel's look so the two dev menus read as a set.
+.roadEditor {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 12px 14px;
+	background: rgba(20, 22, 28, 0.85);
+	color: #fff;
+	font-family: sans-serif;
+	font-size: 12px;
+	min-width: 200px;
+	user-select: none;
+
+	&__row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	&__hint {
+		opacity: 0.75;
+	}
+
+	&__buttons {
+		display: flex;
+		gap: 8px;
+		margin-top: 6px;
+
+		button {
+			flex: 1;
+			padding: 6px 8px;
+			border: 0;
+			border-radius: 6px;
+			background: rgba(255, 255, 255, 0.14);
+			color: #fff;
+			font-size: 12px;
+			cursor: pointer;
+
+			&:hover {
+				background: rgba(255, 255, 255, 0.24);
+			}
+		}
+	}
+}

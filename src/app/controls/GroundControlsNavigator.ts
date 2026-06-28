@@ -255,6 +255,13 @@ export default class GroundControlsNavigator extends ControlsNavigator {
 		this.target.z += v.y;
 	}
 
+	// Strata Checkpoint ③ — public access for the CPU road click-pick. Projects a screen point to the
+	// ground plane in the car/corridor frame (frame E, world mercator [x, z]), the frame the editable
+	// road centerlines live in. Reuses the same unproject→ground-plane math the map drag already uses.
+	public screenToGround(clientX: number, clientY: number): Vec2 {
+		return this.projectOnGround(clientX, clientY);
+	}
+
 	private projectOnGround(clientX: number, clientY: number): Vec2 {
 		const screenPos = new Vec2(clientX, clientY);
 		const screenSize = new Vec2(window.innerWidth, window.innerHeight);

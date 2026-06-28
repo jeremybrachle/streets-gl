@@ -1,4 +1,5 @@
 import {TerrainTextureRegistry, TERRAIN_TEXTURE_OPTIONS} from "./TerrainTextureRegistry";
+import Config from "~/app/Config";
 
 // jest runs in the `node` env (no localStorage) — provide a minimal in-memory stub so the
 // persistence round-trip is actually exercised (the registry's save/load already no-op safely when
@@ -14,8 +15,27 @@ const installLocalStorageStub = (): void => {
 };
 
 describe('TerrainTextureRegistry', () => {
+	// The switcher is parked in the app (Config.TerrainTextureSwitcher = false) so the engine's original
+	// ground always shows; these tests exercise the underlying switcher logic that re-enabling restores,
+	// so force the flag on. A dedicated test below covers the parked behavior.
+	const originalFlag = Config.TerrainTextureSwitcher;
 	beforeEach(() => {
 		installLocalStorageStub();
+		Config.TerrainTextureSwitcher = true;
+	});
+	afterEach(() => {
+		Config.TerrainTextureSwitcher = originalFlag;
+	});
+
+	it('when parked (Config off) locks to the engine original and ignores any persisted choice', () => {
+		Config.TerrainTextureSwitcher = false;
+		if (typeof localStorage !== 'undefined') {
+			localStorage.setItem('strata.terrainTexture.v1', JSON.stringify({currentId: 'leafy_grass', detailScale: 4}));
+		}
+		const r = new TerrainTextureRegistry();
+		expect(r.currentId).toBe('sgl_original');
+		expect(r.currentBiome()).toBe('regional');
+		expect(r.detailScale).toBe(1);
 	});
 
 	it('defaults to the first option (current grass)', () => {

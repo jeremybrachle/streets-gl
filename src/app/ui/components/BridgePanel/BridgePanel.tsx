@@ -4,6 +4,7 @@ import {bridgeRegistry} from "~/app/bridge/BridgeRegistry";
 import {buildingCollisionRegistry} from "~/app/collision/BuildingCollisionRegistry";
 import {terrainTextureRegistry} from "~/app/render/materials/TerrainTextureRegistry";
 import DraggablePanel from "~/app/ui/components/DraggablePanel";
+import Config from "~/app/Config";
 
 // Exact-entry number box paired with each slider. Keeps its own text state while focused so a
 // partial edit (empty, "-", "1.") doesn't snap back to the controlled value; commits every time the
@@ -211,7 +212,7 @@ const BridgePanel: React.FC = () => {
 	);
 
 	return (
-		<DraggablePanel prefId="bridgeBuilder" title="Bridge Builder" defaultStyle={{top: 70, left: 16}} bare>
+		<DraggablePanel prefId="bridgeBuilder" title="Dev panel" defaultStyle={{top: 70, left: 16}} bare>
 		<div className={styles.bridgePanel}>
 			<label className={styles['bridgePanel__row']}>
 				<input
@@ -301,6 +302,9 @@ const BridgePanel: React.FC = () => {
 				/>
 			</label>
 
+			{/* Terrain texture switcher parked (Config.TerrainTextureSwitcher) — distracting while only
+			    one area is editable; revisit with click-to-edit terrain. */}
+			{Config.TerrainTextureSwitcher && (<>
 			<div className={styles['bridgePanel__title']}>Terrain texture</div>
 			{terrainTextureRegistry.options.map(opt => (
 				<label className={styles['bridgePanel__row']} key={opt.id}>
@@ -333,6 +337,7 @@ const BridgePanel: React.FC = () => {
 					onCommit={(v): void => setDetailScale(v)}
 				/>
 			</label>
+			</>)}
 
 			<div className={styles['bridgePanel__buttons']}>
 				<button type="button" onClick={onSave} onPointerUp={releaseFocus}>

@@ -17,6 +17,7 @@ import SavedPlacesModalPanel from "~/app/ui/components/SavedPlacesModalPanel";
 import DataTimestamp from "~/app/ui/components/DataTimestamp";
 import Speedometer from "~/app/ui/components/Speedometer";
 import BridgePanel from "~/app/ui/components/BridgePanel";
+import RoadEditorPanel from "~/app/ui/components/RoadEditorPanel";
 import HiddenBuildingsPanel from "~/app/ui/components/HiddenBuildingsPanel";
 
 const MainScreen: React.FC = () => {
@@ -76,6 +77,9 @@ const MainScreen: React.FC = () => {
 			}
 			{!driveActive && <DebugInfo showRenderGraph={showRenderGraph}/>}
 			{driveActive && <BridgePanel/>}
+			{/* The road-height editor is its own menu, visible in EVERY mode: click-select roads in the
+			    flyover view, keep it up while drive-testing. Self-gates on Config.EditableRoadEditing. */}
+			<RoadEditorPanel/>
 			<Speedometer/>
 			<DataTimestamp/>
 			<TimePanel/>

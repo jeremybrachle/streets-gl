@@ -54,6 +54,7 @@ import {terrainTextureRegistry} from "~/app/render/materials/TerrainTextureRegis
 import ResourceLoader from "~/app/world/ResourceLoader";
 import {RendererTypes} from "~/lib/renderer/RendererTypes";
 import {buildingCollisionRegistry, ModelFootprint} from "~/app/collision/BuildingCollisionRegistry";
+import {editableRoadRegistry} from "~/app/roadcompiler/EditableRoadRegistry";
 import {polygonAABB} from "~/app/collision/FootprintCollision";
 import Vec3 from "~/lib/math/Vec3";
 import BridgeModelObject from "~/app/objects/BridgeModelObject";
@@ -121,6 +122,8 @@ export default class GBufferPass extends Pass<{
 	private carMatricesPrev: Mat4[] = [];
 	// Previous-frame collision-debug-overlay origin-relative matrix, for its TAA motion vector.
 	private collisionDebugMatrixPrev: Mat4 = null;
+	// Strata Checkpoint ③ — prev-frame matrix for the selection highlight ribbon's motion vector.
+	private selectionRibbonMatrixPrev: Mat4 = null;
 	// Signature of the last bridge-model placement the tower collision footprints were synced to.
 	private bridgeFootprintSig: string = '';
 	public objectIdBuffer: Uint32Array = new Uint32Array(1);
@@ -900,6 +903,59 @@ export default class GBufferPass extends Pass<{
 		this.collisionDebugMatrixPrev = debugMatrix;
 	}
 
+	// Strata Checkpoint ③ (step 2b) — the road-editor selection highlight. A green ribbon laid over the
+	// clicked road's centerline so selection is visible from the orbit camera. Gated on the master flag
+	// + a live selection; (re)built from editableRoadRegistry against the real terrain, like the deck /
+	// collision overlay. Reuses the car vertex-colour material. Pure renderer glue — no moat logic.
+	private renderSelectionRibbon(instancesOrigin: Vec2): void {
+		if (!Config.EditableRoadEditing || editableRoadRegistry.selectedWayId === null) {
+			return;
+		}
+
+		const ribbon = this.manager.sceneSystem.objects.selectionRibbon;
+		const camera = this.manager.sceneSystem.objects.camera;
+
+		const terrainHeightProvider = this.manager.systemManager.getSystem(TerrainSystem).terrainHeightProvider;
+		ribbon.maybeRebuild(
+			this.renderer,
+			(x, z) => terrainHeightProvider.getHeightGlobalInterpolated(x, z, true)
+		);
+
+		if (!ribbon.mesh) {
+			return;
+		}
+
+		let ribbonMatrix = Mat4.identity();
+		ribbonMatrix = Mat4.translate(
+			ribbonMatrix,
+			ribbon.anchor[0] - instancesOrigin.x,
+			0,
+			ribbon.anchor[1] - instancesOrigin.y
+		);
+
+		ribbon.position.set(instancesOrigin.x, 0, instancesOrigin.y);
+		ribbon.updateMatrix();
+		ribbon.updateMatrixWorld();
+
+		const material = this.carMaterial;
+		const mvMatrixPrev = Mat4.multiply(this.cameraMatrixWorldInversePrev, ribbon.matrixWorld);
+		const prev = this.selectionRibbonMatrixPrev ?? ribbonMatrix;
+
+		this.renderer.useMaterial(material);
+
+		material.getUniform('projectionMatrix', 'MainBlock').value = new Float32Array(camera.jitteredProjectionMatrix.values);
+		material.getUniform('modelMatrix', 'MainBlock').value = new Float32Array(ribbon.matrixWorld.values);
+		material.getUniform('viewMatrix', 'MainBlock').value = new Float32Array(camera.matrixWorldInverse.values);
+		material.getUniform('modelViewMatrixPrev', 'MainBlock').value = new Float32Array(mvMatrixPrev.values);
+		material.getUniform('carMatrix', 'MainBlock').value = new Float32Array(ribbonMatrix.values);
+		material.getUniform('carMatrixPrev', 'MainBlock').value = new Float32Array(prev.values);
+		material.updateUniformBlock('MainBlock');
+
+		ribbon.mesh.draw();
+
+		this.selectionRibbonMatrixPrev = ribbonMatrix;
+	}
+
 	// Strata Lane B Increment 9 — the GGB hero model. A decoupled VISUAL prop placed over the drivable
 	// deck from the corridor's model* tunables (panel sliders). Origin-relative precision pivot like the
 	// deck/car: the mesh is centered on its own bbox, the carMatrix uniform carries
@@ -1208,6 +1264,7 @@ export default class GBufferPass extends Pass<{
 		this.renderWorldTreeScatter(instancesOrigin);
 		this.renderModelBuildingScatter(instancesOrigin);
 		this.renderCollisionDebug(instancesOrigin);
+		this.renderSelectionRibbon(instancesOrigin);
 		this.renderCar(instancesOrigin);
 		this.writeToObjectIdBuffer();
 

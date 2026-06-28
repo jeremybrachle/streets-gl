@@ -26,6 +26,7 @@ import Car from "~/app/objects/Car";
 import DeckRibbon from "~/app/objects/DeckRibbon";
 import BridgeModelObject from "~/app/objects/BridgeModelObject";
 import CollisionDebugMesh from "~/app/objects/CollisionDebugMesh";
+import SelectionRibbonMesh from "~/app/objects/SelectionRibbonMesh";
 import WorldTreeScatter from "~/app/objects/WorldTreeScatter";
 import BuildingModelObject from "~/app/objects/BuildingModelObject";
 import ModelBuildingScatter from "~/app/objects/ModelBuildingScatter";
@@ -52,6 +53,10 @@ interface SceneObjects {
 	// Strata physics spike — the VISIBLE building-collision overlay (red footprint decals, drawn by
 	// GBufferPass.renderCollisionDebug, gated by buildingCollisionRegistry.showDebug).
 	collisionDebug: CollisionDebugMesh;
+	// Strata Checkpoint ③ (s21) — the road-editor selection highlight (green ribbon over the clicked
+	// road, drawn by GBufferPass.renderSelectionRibbon, gated by Config.EditableRoadEditing + a live
+	// selection in editableRoadRegistry).
+	selectionRibbon: SelectionRibbonMesh;
 	// Strata Lane B (s11) — world-wide model-tree scatter: per-tile clusters built from the engine's
 	// OSM forest 'tree' instance buffers, near-camera only (drawn by GBufferPass.renderWorldTreeScatter).
 	worldTreeScatter: WorldTreeScatter;
@@ -102,6 +107,7 @@ export default class SceneSystem extends System {
 		const deckRibbon = new DeckRibbon();
 		const bridgeModel = new BridgeModelObject();
 		const collisionDebug = new CollisionDebugMesh();
+		const selectionRibbon = new SelectionRibbonMesh();
 		const worldTreeScatter = new WorldTreeScatter();
 		const placedBuildings = new BuildingModelObject();
 		const modelBuildingScatter = new ModelBuildingScatter();
@@ -120,6 +126,7 @@ export default class SceneSystem extends System {
 			deckRibbon,
 			bridgeModel,
 			collisionDebug,
+			selectionRibbon,
 			worldTreeScatter,
 			placedBuildings,
 			modelBuildingScatter
@@ -183,7 +190,7 @@ export default class SceneSystem extends System {
 		this.scene.add(wrapper);
 		wrapper.add(
 			camera, csm, skybox, tiles, labels, terrain, car, deckRibbon, bridgeModel, collisionDebug,
-			worldTreeScatter, placedBuildings, modelBuildingScatter,
+			selectionRibbon, worldTreeScatter, placedBuildings, modelBuildingScatter,
 			...this.objects.instancedObjects.values(),
 			...this.objects.instancedAircraftParts.values()
 		);
