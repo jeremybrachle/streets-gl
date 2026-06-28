@@ -14,6 +14,7 @@ import {HeightLoaderTile} from "~/app/terrain/TerrainHeightLoader";
 import ControlsSystem, {NavigationMode} from "~/app/systems/ControlsSystem";
 import Tile3DBuffers from "~/lib/tile-processing/tile3d/buffers/Tile3DBuffers";
 import SettingsSystem from "~/app/systems/SettingsSystem";
+import {editableRoadRegistry} from "~/app/roadcompiler/EditableRoadRegistry";
 
 interface QueueItem {
 	position: Vec2;
@@ -82,6 +83,16 @@ export default class TileSystem extends System {
 				const instancedObjects = this.systemManager.getSystem(SceneSystem).objects.instancedObjects;
 				tile.load(tileData);
 				tile.updateInstancesBoundingBoxes(instancedObjects);
+
+				// Road-compiler (Checkpoint ③, step 2): register this tile's bridge centerlines for the
+				// height editor's CPU click-pick. Keyed by tile so removeTile drops exactly this set.
+				editableRoadRegistry.ingestTile(`${x},${y}`, tileData.bridgeCenterlines);
+				if (Config.DebugLogEditableRoads && tileData.bridgeCenterlines?.length) {
+					console.log(
+						`[Strata] editable roads +${tileData.bridgeCenterlines.length} from tile ${x},${y} ` +
+						`(total ${editableRoadRegistry.count()})`
+					);
+				}
 			}
 		});
 	}
@@ -107,6 +118,9 @@ export default class TileSystem extends System {
 
 		tile.dispose();
 		this.tiles.delete(`${x},${y}`);
+
+		// Road-compiler (Checkpoint ③): drop this tile's editable bridge centerlines as it unloads.
+		editableRoadRegistry.dropTile(`${x},${y}`);
 	}
 
 	public getTileByLocalId(localId: number): Tile {

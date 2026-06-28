@@ -44,7 +44,10 @@ export class Tile3DFeaturesToBuffersConverter {
 			hugging: this.getHuggingBuffers(collection.hugging),
 			terrainMask: this.getTerrainMaskBuffers(collection.terrainMask, collection.zoom),
 			labels: this.getLabelsBuffers(collection.labels),
-			instances: this.getInstanceBuffers(collection.instances)
+			instances: this.getInstanceBuffers(collection.instances),
+			// Road-compiler (Checkpoint ③): pass the editor's bridge centerlines straight through (plain
+			// arrays, structured-cloned to the main thread alongside the geometry buffers).
+			bridgeCenterlines: collection.bridgeCenterlines ?? []
 		};
 	}
 

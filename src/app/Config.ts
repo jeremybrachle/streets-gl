@@ -46,6 +46,14 @@ const Config = {
 	SlippyMapMaxZoom: 16,
 	SlippyMapZoomFactor: 0.001,
 	SlippyMapFetchBatchSize: 4,
+	// DEBUG (Checkpoint ②): render bridge/elevated roadways with a loud stand-in texture so tagged ways
+	// are visually obvious against ground roads. Throwaway diagnostic — toggle off to restore normal
+	// road textures. (True magenta needs a dedicated atlas texture; this reuses an existing one.)
+	DebugHighlightBridges: true,
+	// DEBUG (Checkpoint ③, step 2a): log each tile's editable bridge centerlines as they reach the
+	// main-thread EditableRoadRegistry, plus the running total — a console proof that the worker→main
+	// centerline plumbing works before the click-pick UI lands. Throwaway diagnostic.
+	DebugLogEditableRoads: true,
 	SettingsSchema: {
 		fov: {
 			label: 'Vertical field of view',

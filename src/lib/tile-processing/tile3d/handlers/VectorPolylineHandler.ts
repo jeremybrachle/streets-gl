@@ -15,7 +15,10 @@ import Intersection, {IntersectionDirection} from "~/lib/road-graph/Intersection
 import {VectorAreaDescriptor, VectorPolylineDescriptor} from "~/lib/tile-processing/vector/qualifiers/descriptors";
 import {ProjectedTextures} from "~/lib/tile-processing/tile3d/textures";
 import {isDeckedBridgeWay} from "~/lib/tile-processing/tile3d/handlers/deckedBridges";
-import {isTilePathUnderCorridorSpan} from "~/app/bridge/CorridorSuppression";
+import {isTilePathUnderCorridorSpan, tileVerticesToWorldMercator} from "~/app/bridge/CorridorSuppression";
+import {OSMReferenceType} from "~/lib/tile-processing/vector/features/OSMReference";
+import type {EditableRoadCenterline} from "~/app/roadcompiler/EditableRoadRegistry";
+import Config from "~/app/Config";
 
 export default class VectorPolylineHandler implements Handler {
 	private readonly osmReference: OSMReference;
@@ -102,6 +105,29 @@ export default class VectorPolylineHandler implements Handler {
 		return this.graphRoad;
 	}
 
+	/**
+	 * Road-compiler (Checkpoint ③, step 2): this way's centerline in frame E (world mercator [X, Z] —
+	 * the car/corridor frame), but ONLY for a bridge-tagged drivable roadway addressable by OSM way id.
+	 * Returns null otherwise. The main-thread EditableRoadRegistry collects these for CPU click-pick.
+	 * Requires setTileCoords to have run (frame-D → frame-E conversion needs the tile index).
+	 */
+	public getEditableBridgeCenterline(): EditableRoadCenterline | null {
+		if (!this.descriptor.isBridge || this.descriptor.type !== 'path' || this.descriptor.pathType !== 'roadway') {
+			return null;
+		}
+		if (this.zoom < 0 || this.vertices.length < 2) {
+			return null;
+		}
+		if (!this.osmReference || this.osmReference.type !== OSMReferenceType.Way) {
+			return null;
+		}
+
+		return {
+			osmWayId: this.osmReference.id,
+			centerline: tileVerticesToWorldMercator(this.vertices, this.xtile, this.ytile, this.zoom)
+		};
+	}
+
 	private handlePath(): Tile3DFeature[] {
 		const features: Tile3DFeature[] = [];
 
@@ -130,6 +156,13 @@ export default class VectorPolylineHandler implements Handler {
 			this.descriptor.width,
 			this.mercatorScale
 		);
+		// DEBUG (Checkpoint ②): a way joined to the bridge sidecar (descriptor.isBridge) is drawn with a
+		// loud stand-in texture so tagged elevated roadways are obvious against ground roads. Throwaway
+		// diagnostic gated by Config.DebugHighlightBridges; does not change geometry/height.
+		if (Config.DebugHighlightBridges && this.descriptor.isBridge && params.length > 0) {
+			params[0].textureId = ProjectedTextures.BasketballPitch;
+		}
+
 		const {vertices, vertexAdjacentToStart, vertexAdjacentToEnd} = this.getPathBuilderVertices();
 
 		if (vertices.length < 2) {

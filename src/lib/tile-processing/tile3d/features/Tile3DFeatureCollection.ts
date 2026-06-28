@@ -4,6 +4,7 @@ import Tile3DInstance from "~/lib/tile-processing/tile3d/features/Tile3DInstance
 import Tile3DHuggingGeometry from "~/lib/tile-processing/tile3d/features/Tile3DHuggingGeometry";
 import Tile3DLabel from "~/lib/tile-processing/tile3d/features/Tile3DLabel";
 import Tile3DTerrainMaskGeometry from "~/lib/tile-processing/tile3d/features/Tile3DTerrainMaskGeometry";
+import type {EditableRoadCenterline} from "~/app/roadcompiler/EditableRoadRegistry";
 
 export default interface Tile3DFeatureCollection {
 	x: number;
@@ -15,4 +16,7 @@ export default interface Tile3DFeatureCollection {
 	terrainMask: Tile3DTerrainMaskGeometry[];
 	labels: Tile3DLabel[];
 	instances: Tile3DInstance[];
+	// Road-compiler (Checkpoint ③): bridge-tagged road centerlines in frame E for the height editor's
+	// CPU click-pick. Plain/serializable so it rides the worker→main postMessage with the buffers.
+	bridgeCenterlines: EditableRoadCenterline[];
 }

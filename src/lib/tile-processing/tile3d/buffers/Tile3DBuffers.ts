@@ -1,3 +1,5 @@
+import type {EditableRoadCenterline} from "~/app/roadcompiler/EditableRoadRegistry";
+
 export interface BoundingBox {
 	minX: number;
 	minY: number;
@@ -58,4 +60,7 @@ export default interface Tile3DBuffers {
 	terrainMask: Tile3DTerrainMask;
 	labels: Tile3DBuffersLabels;
 	instances: Record<string, Tile3DBuffersInstance>;
+	// Road-compiler (Checkpoint ③): bridge-tagged road centerlines (frame E) for the height editor's CPU
+	// click-pick. Plain arrays — structured-cloned across the worker boundary, not a transferable.
+	bridgeCenterlines: EditableRoadCenterline[];
 }

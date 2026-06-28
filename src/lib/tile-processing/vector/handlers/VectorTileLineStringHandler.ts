@@ -12,6 +12,7 @@ import VectorPolyline from "~/lib/tile-processing/vector/features/VectorPolyline
 import {ModifierType} from "~/lib/tile-processing/vector/qualifiers/modifiers";
 import Ring from "~/lib/tile-processing/vector/handlers/Ring";
 import {VectorAreaRingType} from "~/lib/tile-processing/vector/features/VectorArea";
+import {lookupBridgeTags} from "~/lib/tile-processing/vector/sidecar/BridgeSidecar";
 
 export default class VectorTileLineStringHandler implements VectorTileHandler {
 	private readonly tags: VectorTile.FeatureTags;
@@ -66,11 +67,22 @@ export default class VectorTileLineStringHandler implements VectorTileHandler {
 		descriptor: VectorPolylineDescriptor
 	): VectorPolyline {
 		const nodes = this.getVectorNodesFromGeometry(geometryIndex);
+		const descriptorCopy = {...descriptor};
+
+		// Decode-time tag join (roadmap Phase A.2 / Checkpoint ②): the streets.gl PBF schema strips
+		// `bridge`/`layer`, so recover them from the static sidecar by osmId and stamp the flags the road
+		// pipeline already understands (descriptor.isBridge / bridgeLayer).
+		const sidecarEntry = lookupBridgeTags(this.osmReference);
+
+		if (sidecarEntry && sidecarEntry.bridge) {
+			descriptorCopy.isBridge = true;
+			descriptorCopy.bridgeLayer = sidecarEntry.layer;
+		}
 
 		return {
 			type: 'polyline',
 			osmReference: this.osmReference,
-			descriptor: {...descriptor},
+			descriptor: descriptorCopy,
 			nodes: nodes
 		};
 	}

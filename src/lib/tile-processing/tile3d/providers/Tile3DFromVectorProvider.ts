@@ -25,6 +25,7 @@ import VectorNode from "~/lib/tile-processing/vector/features/VectorNode";
 import {OMBBResult} from "~/lib/tile-processing/tile3d/builders/Tile3DMultipolygon";
 import Vec2 from "~/lib/math/Vec2";
 import Vec3 from "~/lib/math/Vec3";
+import type {EditableRoadCenterline} from "~/app/roadcompiler/EditableRoadRegistry";
 
 export interface Tile3DProviderParams {
 	overpassEndpoint: string;
@@ -69,7 +70,28 @@ export default class Tile3DFromVectorProvider implements FeatureProvider<Tile3DF
 
 		applyMercatorFactorToExtrudedFeatures(collection.extruded, x, y, zoom);
 
+		// Road-compiler (Checkpoint ③): collect bridge-tagged road centerlines (frame E) for the editor's
+		// CPU click-pick. Done after updateFeaturesTileCoords so the frame-D → frame-E conversion has the
+		// tile index. Additive; does not affect any rendered geometry.
+		collection.bridgeCenterlines = Tile3DFromVectorProvider.collectBridgeCenterlines(handlers);
+
 		return collection;
+	}
+
+	private static collectBridgeCenterlines(handlers: Handler[]): EditableRoadCenterline[] {
+		const out: EditableRoadCenterline[] = [];
+
+		for (const handler of handlers) {
+			if (handler instanceof VectorPolylineHandler) {
+				const centerline = handler.getEditableBridgeCenterline();
+
+				if (centerline) {
+					out.push(centerline);
+				}
+			}
+		}
+
+		return out;
 	}
 
 	private static createHandlersFromVectorFeatureCollection(collection: VectorFeatureCollection): Handler[] {
