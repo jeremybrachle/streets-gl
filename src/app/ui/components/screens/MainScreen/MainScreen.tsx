@@ -18,7 +18,13 @@ import DataTimestamp from "~/app/ui/components/DataTimestamp";
 import Speedometer from "~/app/ui/components/Speedometer";
 import BridgePanel from "~/app/ui/components/BridgePanel";
 import RoadEditorPanel from "~/app/ui/components/RoadEditorPanel";
+import RoadGraphOverlayStatus from "~/app/ui/components/RoadGraphOverlayStatus";
+import Minimap from "~/app/ui/components/Minimap";
+import FullscreenMap from "~/app/ui/components/FullscreenMap";
 import HiddenBuildingsPanel from "~/app/ui/components/HiddenBuildingsPanel";
+import Config from "~/app/Config";
+import {roadGraphOverlay} from "~/app/roadcompiler/RoadGraphOverlayRegistry";
+import {routeRegistry} from "~/app/roadcompiler/RouteRegistry";
 
 const MainScreen: React.FC = () => {
 	const atoms = useContext(AtomsContext);
@@ -29,6 +35,8 @@ const MainScreen: React.FC = () => {
 	const driveActive = useRecoilValue(atoms.driveActive);
 	const [activeModalWindow, setActiveModalWindow] = useState<string>('');
 	const [isUIVisible, setIsUIVisible] = useState<boolean>(true);
+	// Strata GPS — the full-screen "magnify" map, opened by clicking the minimap.
+	const [mapExpanded, setMapExpanded] = useState<boolean>(false);
 
 	const showRenderGraph = useCallback((): void => setIsRenderGraphVisible(true), []);
 	const hideRenderGraph = useCallback((): void => setIsRenderGraphVisible(false), []);
@@ -44,6 +52,19 @@ const MainScreen: React.FC = () => {
 
 			if (e.code === 'Escape') {
 				closeModal();
+			}
+
+			// Strata P2/P2.5 — KeyO toggles the road-graph alignment overlay. The load is kicked from the
+			// render pass using the live camera position: a bundled city (SF) loads instantly, any other is
+			// fetched from Overpass on demand and cached.
+			if (e.code === 'KeyO' && Config.RoadGraphOverlay) {
+				roadGraphOverlay.toggleVisible();
+			}
+
+			// Strata GPS — KeyP toggles the yellow active-route ribbon in the 3D world, independently of the
+			// KeyO all-roads overlay. (Pick the destination on the full-screen map, opened from the minimap.)
+			if (e.code === 'KeyP' && Config.RoadGraphOverlay) {
+				routeRegistry.toggleVisible();
 			}
 		}
 
@@ -80,7 +101,13 @@ const MainScreen: React.FC = () => {
 			{/* The road-height editor is its own menu, visible in EVERY mode: click-select roads in the
 			    flyover view, keep it up while drive-testing. Self-gates on Config.EditableRoadEditing. */}
 			<RoadEditorPanel/>
+			{/* P2.5 — "Loading road graph…" indicator while an un-bundled city's OSM graph fetches. */}
+			<RoadGraphOverlayStatus/>
 			<Speedometer/>
+			{/* s28 — GTA-style 2D minimap; self-gates on driveActive (only visible while driving).
+			    Clicking it opens the full-screen "magnify" map where you pick a GPS destination. */}
+			<Minimap onExpand={(): void => setMapExpanded(true)}/>
+			{driveActive && mapExpanded && <FullscreenMap onClose={(): void => setMapExpanded(false)}/>}
 			<DataTimestamp/>
 			<TimePanel/>
 			<SelectionPanel/>

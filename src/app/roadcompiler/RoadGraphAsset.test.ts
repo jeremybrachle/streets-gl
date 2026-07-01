@@ -4,9 +4,13 @@ import {
 	parseLanes,
 	parseOneway,
 	waysWithMissingNodes,
+	latLonToFrameE,
+	roadGraphToFrameEPolylines,
 	DRIVABLE_HIGHWAYS,
-	OverpassElement
+	OverpassElement,
+	RoadGraphAsset
 } from "./RoadGraphAsset";
+import MathUtils from "~/lib/math/MathUtils";
 
 describe("parse helpers", () => {
 	test("parseLayer handles ints, negatives, lists, blanks", () => {
@@ -121,5 +125,51 @@ describe("assembleRoadGraph", () => {
 		expect(DRIVABLE_HIGHWAYS.has("motorway")).toBe(true);
 		expect(DRIVABLE_HIGHWAYS.has("service")).toBe(true);
 		expect(DRIVABLE_HIGHWAYS.has("footway")).toBe(false);
+	});
+});
+
+describe("frame-E projection (P2 overlay)", () => {
+	// The whole P2 alignment story rests on the overlay projecting nodes EXACTLY as the engine projects
+	// the rendered roads. latLonToFrameE is an inline copy of MathUtils.degrees2meters; pin them equal so
+	// the copy can never silently drift from the engine projection.
+	test("latLonToFrameE is identical to MathUtils.degrees2meters", () => {
+		const coords: [number, number][] = [
+			[37.8094, -122.4108],  // SF
+			[37.8327, -122.4818],  // GGB north approach
+			[0, 0],
+			[51.5074, -0.1278],    // London (any city — no SF hardcoding)
+			[-33.8688, 151.2093],  // Sydney (southern hemisphere)
+		];
+
+		for (const [lat, lon] of coords) {
+			const m = MathUtils.degrees2meters(lat, lon);
+			const [x, z] = latLonToFrameE(lat, lon);
+			expect(x).toBeCloseTo(m.x, 6); // X from lat
+			expect(z).toBeCloseTo(m.y, 6); // Z from lon (Vec2.y holds the mercator z)
+		}
+	});
+
+	test("roadGraphToFrameEPolylines resolves ordered nodes through the table", () => {
+		const asset: RoadGraphAsset = {
+			meta: {region: "x", label: "x", bbox: [0, 0, 1, 1], generated: "t", attribution: "a", nodeCount: 3, wayCount: 1},
+			nodes: {1: [37.81, -122.41], 2: [37.82, -122.42], 3: [37.83, -122.43]},
+			ways: [{id: 7, nodes: [1, 2, 3], highway: "motorway"}],
+		};
+
+		const lines = roadGraphToFrameEPolylines(asset);
+		expect(lines).toHaveLength(1);
+		expect(lines[0].id).toBe(7);
+		expect(lines[0].points).toHaveLength(3);
+		expect(lines[0].points[0]).toEqual(latLonToFrameE(37.81, -122.41)); // ordered + projected
+	});
+
+	test("drops a way left with <2 resolvable points (missing node coords)", () => {
+		const asset: RoadGraphAsset = {
+			meta: {region: "x", label: "x", bbox: [0, 0, 1, 1], generated: "t", attribution: "a", nodeCount: 1, wayCount: 1},
+			nodes: {1: [37.81, -122.41]},                       // node 2 absent
+			ways: [{id: 7, nodes: [1, 2], highway: "service"}],
+		};
+
+		expect(roadGraphToFrameEPolylines(asset)).toEqual([]);
 	});
 });

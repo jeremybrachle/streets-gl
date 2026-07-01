@@ -211,6 +211,60 @@ export function assembleRoadGraph(elements: readonly OverpassElement[], opts: As
 	};
 }
 
+// ---------------------------------------------------------------------------------------------------
+// Frame-E projection (P2 overlay). Strata renders in "frame E" = web-mercator meters centered at 0,
+// [X derived from lat, Z derived from lon] — the SAME frame the car drives in and the GGB corridor /
+// CorridorSuppression use. To keep this module PURE (the Node generator imports it, so no `~/` engine
+// deps), the projection is an INLINE copy of MathUtils.degrees2meters — NOT a second projection. The
+// unit test pins latLonToFrameE exactly equal to MathUtils.degrees2meters so the copy can never drift.
+
+const MERCATOR_HALF_EXTENT = 20037508.34; // = WORLD_SIZE / 2, the degrees2meters scale constant
+
+/** One drivable road as a frame-E polyline (mercator meters), ready to drape/draw. */
+export interface FrameEWayPolyline {
+	/** OSM way id (carried through so the overlay can key back to the graph). */
+	id: number;
+	/** Ordered [X, Z] mercator-meter points; X from lat, Z from lon. */
+	points: [number, number][];
+}
+
+/**
+ * Project a WGS84 [lat, lon] into Strata frame E ([X from lat, Z from lon], mercator meters).
+ * Inline mirror of MathUtils.degrees2meters (kept here to preserve this module's purity); pinned equal
+ * to it in RoadGraphAsset.test.ts. This is the ONLY projection — no new alignment logic.
+ */
+export function latLonToFrameE(lat: number, lon: number): [number, number] {
+	const z = lon * MERCATOR_HALF_EXTENT / 180;
+	const x = Math.log(Math.tan((90 + lat) * Math.PI / 360)) * MERCATOR_HALF_EXTENT / Math.PI;
+	return [x, z];
+}
+
+/**
+ * Resolve every way's ordered node ids through the asset's node table and project to frame E.
+ * Ways whose geometry drops below 2 resolvable points are skipped (can't draw a line). Pure — the
+ * P2 main-thread overlay loader calls this once per loaded asset.
+ */
+export function roadGraphToFrameEPolylines(asset: RoadGraphAsset): FrameEWayPolyline[] {
+	const out: FrameEWayPolyline[] = [];
+
+	for (const way of asset.ways) {
+		const points: [number, number][] = [];
+
+		for (const nodeId of way.nodes) {
+			const c = asset.nodes[nodeId];
+			if (c) {
+				points.push(latLonToFrameE(c[0], c[1]));
+			}
+		}
+
+		if (points.length >= 2) {
+			out.push({id: way.id, points});
+		}
+	}
+
+	return out;
+}
+
 /** Way ids whose geometry can't be fully resolved (a node missing from the table). Should be empty for a
  *  `>;`-recursed query; the generator logs any so a bad fetch is visible. Pure helper for tests + CLI. */
 export function waysWithMissingNodes(asset: RoadGraphAsset): number[] {
@@ -221,4 +275,63 @@ export function waysWithMissingNodes(asset: RoadGraphAsset): number[] {
 		}
 	}
 	return out;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Dynamic in-browser fetch helpers (P2.5). The browser loads a not-yet-bundled city's graph on demand
+// with the SAME 3 steps as scripts/genRoadGraph.mjs: build the Overpass query for a BOUNDED bbox around
+// the searched/driven point → fetch → assembleRoadGraph → project. These are pure so both the CLI and the
+// browser single-source them (no drift). A bbox is [south, west, north, east] (WGS84 degrees).
+
+export type Bbox = [number, number, number, number];
+
+/** ~meters per degree of latitude (spherical-earth approx; good enough for a few-km verification box). */
+const METERS_PER_DEG_LAT = 111320;
+
+/**
+ * A bounded bbox of ±halfMeters around (lat, lon) — the "few km around the target" the dynamic fetch
+ * queries (SF-wide was 8 MB; a ~6 km box is a fraction of that). Longitude degrees are scaled by cos(lat)
+ * so the box stays roughly square in meters at any latitude. Returns [south, west, north, east].
+ */
+export function bboxAround(lat: number, lon: number, halfMeters: number): Bbox {
+	const dLat = halfMeters / METERS_PER_DEG_LAT;
+	const cos = Math.max(0.01, Math.cos(lat * Math.PI / 180)); // guard the poles
+	const dLon = halfMeters / (METERS_PER_DEG_LAT * cos);
+	return [lat - dLat, lon - dLon, lat + dLat, lon + dLon];
+}
+
+/** True if (lat, lon) lies inside bbox [south, west, north, east]. Used to skip re-fetching an area we
+ *  already loaded and to pick a bundled region that actually contains the camera. */
+export function bboxContains(bbox: Bbox, lat: number, lon: number): boolean {
+	const [s, w, n, e] = bbox;
+	return lat >= s && lat <= n && lon >= w && lon <= e;
+}
+
+/**
+ * Snap (lat, lon) to a fixed degree grid so nearby toggles/searches bucket to ONE cache entry (and one
+ * fetched area), instead of re-querying Overpass for every slightly-different point. The dynamic bbox is
+ * built around the snapped center, so the cache key and the fetched extent always correspond.
+ */
+export function snapToAreaGrid(lat: number, lon: number, gridDeg: number): [number, number] {
+	return [Math.round(lat / gridDeg) * gridDeg, Math.round(lon / gridDeg) * gridDeg];
+}
+
+/** Stable cache/area key for a snapped grid center — the IndexedDB / in-memory key for a fetched area. */
+export function areaKey(gridLat: number, gridLon: number): string {
+	return `roadgraph:${gridLat.toFixed(4)},${gridLon.toFixed(4)}`;
+}
+
+/**
+ * The Overpass QL query for all drivable roads in a bbox — the SINGLE SOURCE shared by the browser fetch
+ * and scripts/genRoadGraph.mjs. `out body;` gives ways with ordered node-id lists + tags; `>;` selects
+ * every referenced node (even past the bbox edge → ways are never clipped); `out skel qt;` gives node
+ * id+lat+lon. bbox = [south, west, north, east].
+ */
+export function buildOverpassRoadQuery(bbox: Bbox): string {
+	const [s, w, n, e] = bbox;
+	return `[out:json][timeout:180];
+way[highway](${s},${w},${n},${e});
+out body;
+>;
+out skel qt;`;
 }

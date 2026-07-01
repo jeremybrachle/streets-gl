@@ -10,6 +10,7 @@ import {selectSupport, stepFall} from "~/app/bridge/DriveVertical";
 import {buildingCollisionRegistry} from "~/app/collision/BuildingCollisionRegistry";
 import {worldTreeScatterState} from "~/app/objects/models/worldTreeScatterState";
 import {placedBuildingsState} from "~/app/objects/models/placedBuildingsState";
+import {carTelemetry} from "~/app/controls/CarTelemetry";
 
 // Strata Phase 2, Step 1 — THROWAWAY PROTOTYPE GLUE.
 // A logical arcade car pose (x, z, heading, speed) driven with WASD that rides the
@@ -889,10 +890,15 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 		this.updateMovement(deltaTime);
 		this.updateSuspension(deltaTime);
 		this.updateCamera(deltaTime);
+
+		// Publish the live car pose (frame E) for the minimap / HUD to read without touching this system.
+		carTelemetry.publish(this.x, this.z, this.heading, this.speed);
 	}
 
 	public override enable(): void {
 		super.enable();
+
+		carTelemetry.setActive(true);
 
 		this.camera.near = 3;
 		this.camera.far = 100000;
@@ -910,6 +916,8 @@ export default class DriveControlsNavigator extends ControlsNavigator {
 
 	public override disable(): void {
 		super.disable();
+
+		carTelemetry.setActive(false);
 
 		// Restore the FOV the speed punch was modifying.
 		if (this.baseFov > 0) {

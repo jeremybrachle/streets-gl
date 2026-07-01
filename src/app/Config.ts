@@ -59,6 +59,18 @@ const Config = {
 	// selects the nearest editable road centerline; the selection is shown in the road-editor panel and
 	// drawn as a highlight ribbon. Master gate for the editor interactions (off = stock building picking).
 	EditableRoadEditing: true,
+	// P2 — road-graph VISUAL ALIGNMENT GATE. Master gate for the thin-line overlay of the clean OSM
+	// road graph (RoadGraphOverlayRegistry) drawn over the streets-gl roads. When on, the KeyO keystroke
+	// toggles the overlay (auto-loading the graph for the city under the camera). Off = key inert, no
+	// overlay, asset never fetched. Additive/dev — verifies the graph aligns with the rendered roads.
+	RoadGraphOverlay: true,
+	// P2.5 dynamic load: for a city NOT bundled in RoadGraphOverlayRegistry.REGIONS, the overlay fetches a
+	// bounded box of clean roads from Overpass on demand. Half-extent of that box in meters (3 km → ~6 km
+	// box; SF-wide was 8 MB, this is a fraction). Kept small so the one-shot fetch is fast.
+	RoadGraphDynamicHalfExtentMeters: 3000,
+	// Degree grid the fetch center snaps to, so nearby searches/toggles bucket to ONE cached area instead
+	// of re-querying Overpass per point (~0.05° ≈ 5.5 km, roughly the dynamic box size).
+	RoadGraphAreaGridDeg: 0.05,
 	// Live terrain base-texture switcher (s12). Parked for now (only one area can be edited and it
 	// distracts from the road editor) — off = the engine keeps its default ground (the pre-switcher
 	// look) and the dev panel hides the texture controls. Re-enable when the click-to-edit terrain

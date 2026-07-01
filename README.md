@@ -70,9 +70,23 @@ More information about contributing can be found in [CONTRIBUTING.md](CONTRIBUTI
 
 ### Development
 
-1. Clone this repository
-2. Install dependencies with `npm i`
-3. Run `npm run dev` to start a local development server
+Quick start (from a terminal):
+
+```bash
+cd ~/streets-gl-ref     # the repo root — the folder that contains package.json
+npm i                   # install dependencies (first run only)
+npm run dev             # compile + serve with hot-reload at http://localhost:8080
+```
+
+`npm run dev` is the **only** command needed to run the app: it starts webpack-dev-server,
+which compiles the bundle in memory, serves it at <http://localhost:8080>, and hot-reloads on
+every save. Stop it with `Ctrl+C`. The `dev` script sets
+`NODE_OPTIONS=--max-old-space-size=8192` so the long-running dev server doesn't exhaust Node's
+default ~4 GB heap over a session (it will otherwise OOM after a few hours of HMR); if a session
+runs very long, just restart it.
+
+For a production build instead: `npm run build` (outputs to `./build`), then `npm start` to
+serve that folder with `http-server` on port 8080.
 
 Known to work with Node.js 14.19.1.
 

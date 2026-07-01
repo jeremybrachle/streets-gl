@@ -62,14 +62,12 @@ function accumulate(b: Bounds, x: number, y: number, z: number): void {
 export function mergePartsByTexture(prims: RawPrim[]): {parts: BuildingPart[]; bounds: Bounds} {
 	const bounds = emptyBounds();
 	const groups = new Map<string, {P: number[]; N: number[]; UV: number[]; I: number[]}>();
-	const order: string[] = [];
 
 	for (const prim of prims) {
 		let g = groups.get(prim.textureKey);
 		if (!g) {
 			g = {P: [], N: [], UV: [], I: []};
 			groups.set(prim.textureKey, g);
-			order.push(prim.textureKey);
 		}
 		const base = g.P.length / 3;
 		for (let i = 0; i < prim.pos.length; i += 3) {
@@ -81,16 +79,17 @@ export function mergePartsByTexture(prims: RawPrim[]): {parts: BuildingPart[]; b
 		for (let i = 0; i < prim.idx.length; i++) g.I.push(base + prim.idx[i]);
 	}
 
-	const parts: BuildingPart[] = order.map(key => {
-		const g = groups.get(key)!;
-		return {
+	// Map iteration follows insertion order = each texture's first appearance, so parts keep that order.
+	const parts: BuildingPart[] = [];
+	for (const [key, g] of groups) {
+		parts.push({
 			textureKey: key,
 			position: new Float32Array(g.P),
 			normal: new Float32Array(g.N),
 			uv: new Float32Array(g.UV),
 			indices: new Uint32Array(g.I)
-		};
-	});
+		});
+	}
 
 	return {parts, bounds};
 }

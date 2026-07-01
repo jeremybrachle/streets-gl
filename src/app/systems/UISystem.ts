@@ -17,6 +17,7 @@ import UIActions from "~/app/ui/UIActions";
 import Tile from "~/app/objects/Tile";
 import TileObjectsSystem from "~/app/systems/TileObjectsSystem";
 import {hiddenBuildingsRegistry} from "~/app/world/HiddenBuildingsRegistry";
+import {roadGraphOverlay} from "~/app/roadcompiler/RoadGraphOverlayRegistry";
 
 const FPSUpdateInterval = 0.4;
 
@@ -101,6 +102,9 @@ export default class UISystem extends System {
 			updateRenderGraph: () => this.updateRenderGraph(),
 			goToLatLon: (lat: number, lon: number): void => {
 				this.systemManager.getSystem(ControlsSystem).setLatLon(lat, lon);
+				// P2.5: a discrete navigate authorizes the overlay to (re)load the road graph for the new
+				// location on the next visible frame (fetches only if it's on; no-op if already covered).
+				roadGraphOverlay.markDirty();
 			},
 			goToState: (lat: number, lon: number, pitch: number, yaw: number, distance: number): void => {
 				this.systemManager.getSystem(ControlsSystem).setState(lat, lon, pitch, yaw, distance);

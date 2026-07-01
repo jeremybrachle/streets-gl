@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {assembleRoadGraph, waysWithMissingNodes} from '../src/app/roadcompiler/RoadGraphAsset.ts';
+import {assembleRoadGraph, waysWithMissingNodes, buildOverpassRoadQuery} from '../src/app/roadcompiler/RoadGraphAsset.ts';
 
 const OVERPASS = 'https://overpass-api.de/api/interpreter';
 
@@ -73,13 +73,9 @@ async function main() {
 	const outPath = flag('--out')
 		?? path.join(here, '..', 'src', 'lib', 'tile-processing', 'vector', 'sidecar', `${region}RoadGraph.generated.json`);
 
-	// `out body;` → ways with ordered node-id lists + tags; `>;` selects all referenced nodes (even past
-	// the bbox edge → ways are never clipped); `out skel qt;` → each node's id + lat + lon.
-	const query = `[out:json][timeout:180];
-way[highway](${s},${w},${n},${e});
-out body;
->;
-out skel qt;`;
+	// The Overpass query (drivable roads in the bbox, un-clipped) is single-sourced with the in-browser
+	// dynamic loader — see buildOverpassRoadQuery in RoadGraphAsset.ts.
+	const query = buildOverpassRoadQuery([s, w, n, e]);
 
 	console.error(`Querying Overpass for ${label} drivable roads [S ${s}, W ${w}, N ${n}, E ${e}]...`);
 	const data = await overpass(query);

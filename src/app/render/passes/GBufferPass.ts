@@ -42,6 +42,7 @@ import {AircraftPartTextures} from "~/app/render/textures/createAircraftTexture"
 import PerspectiveCamera from "~/lib/core/PerspectiveCamera";
 import ControlsSystem from "~/app/systems/ControlsSystem";
 import CarMaterialContainer from "~/app/render/materials/CarMaterialContainer";
+import OverlayGlowMaterialContainer from "~/app/render/materials/OverlayGlowMaterialContainer";
 import DeckMaterialContainer from "~/app/render/materials/DeckMaterialContainer";
 import TreeModelMaterialContainer from "~/app/render/materials/TreeModelMaterialContainer";
 import BuildingModelMaterialContainer from "~/app/render/materials/BuildingModelMaterialContainer";
@@ -55,6 +56,8 @@ import ResourceLoader from "~/app/world/ResourceLoader";
 import {RendererTypes} from "~/lib/renderer/RendererTypes";
 import {buildingCollisionRegistry, ModelFootprint} from "~/app/collision/BuildingCollisionRegistry";
 import {editableRoadRegistry} from "~/app/roadcompiler/EditableRoadRegistry";
+import {roadGraphOverlay} from "~/app/roadcompiler/RoadGraphOverlayRegistry";
+import {routeRegistry} from "~/app/roadcompiler/RouteRegistry";
 import {polygonAABB} from "~/app/collision/FootprintCollision";
 import Vec3 from "~/lib/math/Vec3";
 import BridgeModelObject from "~/app/objects/BridgeModelObject";
@@ -104,6 +107,8 @@ export default class GBufferPass extends Pass<{
 	private advancedInstanceMaterial: AbstractMaterial;
 	private aircraftMaterial: AbstractMaterial;
 	private carMaterial: AbstractMaterial;
+	// Strata — unlit/glowing material for the road-graph + route ribbons (neon, ignores lighting/shadow).
+	private overlayGlowMaterial: AbstractMaterial;
 	private deckMaterial: AbstractMaterial;
 	// Strata Lane B (s10 models) — textured tree materials, one per texture resource (bark = opaque,
 	// leaf = alpha cutout), cached + reused across species so adding a species needs no new field.
@@ -124,6 +129,10 @@ export default class GBufferPass extends Pass<{
 	private collisionDebugMatrixPrev: Mat4 = null;
 	// Strata Checkpoint ③ — prev-frame matrix for the selection highlight ribbon's motion vector.
 	private selectionRibbonMatrixPrev: Mat4 = null;
+	// Strata P2 — prev-frame matrix for the road-graph overlay's motion vector.
+	private roadGraphOverlayMatrixPrev: Mat4 = null;
+	// Strata GPS — prev-frame matrix for the yellow route overlay's motion vector.
+	private routeOverlayMatrixPrev: Mat4 = null;
 	// Signature of the last bridge-model placement the tower collision footprints were synced to.
 	private bridgeFootprintSig: string = '';
 	public objectIdBuffer: Uint32Array = new Uint32Array(1);
@@ -201,6 +210,7 @@ export default class GBufferPass extends Pass<{
 			<AbstractTexture2DArray>this.manager.texturePool.get('aircraft');
 
 		this.carMaterial = new CarMaterialContainer(this.renderer).material;
+		this.overlayGlowMaterial = new OverlayGlowMaterialContainer(this.renderer).material;
 		this.deckMaterial = new DeckMaterialContainer(this.renderer).material;
 
 		// Strata Lane B (s12) — seed the terrain detail-map cache with the array the container already
@@ -956,6 +966,119 @@ export default class GBufferPass extends Pass<{
 		this.selectionRibbonMatrixPrev = ribbonMatrix;
 	}
 
+	// Strata P2 — the road-graph VISUAL ALIGNMENT GATE. A thin cyan overlay of the clean OSM road graph
+	// (roadGraphOverlay) draped over the streets-gl roads, toggled by KeyO + gated on Config.RoadGraphOverlay.
+	// (Re)built from the loaded city's frame-E polylines against the real terrain, like the selection
+	// ribbon / deck. Reuses the car vertex-colour material. Pure renderer glue — no moat logic.
+	private renderRoadGraphOverlay(instancesOrigin: Vec2): void {
+		if (!Config.RoadGraphOverlay || !roadGraphOverlay.visible) {
+			return;
+		}
+
+		const overlay = this.manager.sceneSystem.objects.roadGraphOverlay;
+		const camera = this.manager.sceneSystem.objects.camera;
+
+		// Lazily load the graph for the city under the camera (kicks the async import on first visible
+		// frame; cheap no-op once loaded). Done here so it uses the live camera position.
+		roadGraphOverlay.ensureForCamera(camera.position.x, camera.position.z);
+
+		const terrainHeightProvider = this.manager.systemManager.getSystem(TerrainSystem).terrainHeightProvider;
+		overlay.maybeRebuild(
+			this.renderer,
+			(x, z) => terrainHeightProvider.getHeightGlobalInterpolated(x, z, true),
+			camera.position.x,
+			camera.position.z
+		);
+
+		if (!overlay.mesh) {
+			return;
+		}
+
+		let overlayMatrix = Mat4.identity();
+		overlayMatrix = Mat4.translate(
+			overlayMatrix,
+			overlay.anchor[0] - instancesOrigin.x,
+			0,
+			overlay.anchor[1] - instancesOrigin.y
+		);
+
+		overlay.position.set(instancesOrigin.x, 0, instancesOrigin.y);
+		overlay.updateMatrix();
+		overlay.updateMatrixWorld();
+
+		const material = this.overlayGlowMaterial;
+		const mvMatrixPrev = Mat4.multiply(this.cameraMatrixWorldInversePrev, overlay.matrixWorld);
+		const prev = this.roadGraphOverlayMatrixPrev ?? overlayMatrix;
+
+		this.renderer.useMaterial(material);
+
+		material.getUniform('projectionMatrix', 'MainBlock').value = new Float32Array(camera.jitteredProjectionMatrix.values);
+		material.getUniform('modelMatrix', 'MainBlock').value = new Float32Array(overlay.matrixWorld.values);
+		material.getUniform('viewMatrix', 'MainBlock').value = new Float32Array(camera.matrixWorldInverse.values);
+		material.getUniform('modelViewMatrixPrev', 'MainBlock').value = new Float32Array(mvMatrixPrev.values);
+		material.getUniform('carMatrix', 'MainBlock').value = new Float32Array(overlayMatrix.values);
+		material.getUniform('carMatrixPrev', 'MainBlock').value = new Float32Array(prev.values);
+		material.updateUniformBlock('MainBlock');
+
+		overlay.mesh.draw();
+
+		this.roadGraphOverlayMatrixPrev = overlayMatrix;
+	}
+
+	// Strata GPS — the active route (routeRegistry) drawn as a yellow ribbon draped over the roads, toggled
+	// by KeyP (routeRegistry.visible) INDEPENDENTLY of the KeyO all-roads overlay. Same drape/material path
+	// as renderRoadGraphOverlay, but the mesh holds just the one route polyline in yellow.
+	private renderRouteOverlay(instancesOrigin: Vec2): void {
+		if (!Config.RoadGraphOverlay || !routeRegistry.visible) {
+			return;
+		}
+
+		const overlay = this.manager.sceneSystem.objects.routeOverlay;
+		const camera = this.manager.sceneSystem.objects.camera;
+
+		const terrainHeightProvider = this.manager.systemManager.getSystem(TerrainSystem).terrainHeightProvider;
+		overlay.maybeRebuild(
+			this.renderer,
+			(x, z) => terrainHeightProvider.getHeightGlobalInterpolated(x, z, true),
+			camera.position.x,
+			camera.position.z
+		);
+
+		if (!overlay.mesh) {
+			return;
+		}
+
+		let overlayMatrix = Mat4.identity();
+		overlayMatrix = Mat4.translate(
+			overlayMatrix,
+			overlay.anchor[0] - instancesOrigin.x,
+			0,
+			overlay.anchor[1] - instancesOrigin.y
+		);
+
+		overlay.position.set(instancesOrigin.x, 0, instancesOrigin.y);
+		overlay.updateMatrix();
+		overlay.updateMatrixWorld();
+
+		const material = this.overlayGlowMaterial;
+		const mvMatrixPrev = Mat4.multiply(this.cameraMatrixWorldInversePrev, overlay.matrixWorld);
+		const prev = this.routeOverlayMatrixPrev ?? overlayMatrix;
+
+		this.renderer.useMaterial(material);
+
+		material.getUniform('projectionMatrix', 'MainBlock').value = new Float32Array(camera.jitteredProjectionMatrix.values);
+		material.getUniform('modelMatrix', 'MainBlock').value = new Float32Array(overlay.matrixWorld.values);
+		material.getUniform('viewMatrix', 'MainBlock').value = new Float32Array(camera.matrixWorldInverse.values);
+		material.getUniform('modelViewMatrixPrev', 'MainBlock').value = new Float32Array(mvMatrixPrev.values);
+		material.getUniform('carMatrix', 'MainBlock').value = new Float32Array(overlayMatrix.values);
+		material.getUniform('carMatrixPrev', 'MainBlock').value = new Float32Array(prev.values);
+		material.updateUniformBlock('MainBlock');
+
+		overlay.mesh.draw();
+
+		this.routeOverlayMatrixPrev = overlayMatrix;
+	}
+
 	// Strata Lane B Increment 9 — the GGB hero model. A decoupled VISUAL prop placed over the drivable
 	// deck from the corridor's model* tunables (panel sliders). Origin-relative precision pivot like the
 	// deck/car: the mesh is centered on its own bbox, the carMatrix uniform carries
@@ -1265,6 +1388,8 @@ export default class GBufferPass extends Pass<{
 		this.renderModelBuildingScatter(instancesOrigin);
 		this.renderCollisionDebug(instancesOrigin);
 		this.renderSelectionRibbon(instancesOrigin);
+		this.renderRoadGraphOverlay(instancesOrigin);
+		this.renderRouteOverlay(instancesOrigin);
 		this.renderCar(instancesOrigin);
 		this.writeToObjectIdBuffer();
 

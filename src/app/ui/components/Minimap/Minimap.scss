@@ -1,0 +1,37 @@
+// The minimap's own look (DraggablePanel is bare). Circular canvas + a small control row underneath.
+.minimap {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	user-select: none;
+
+	&__canvas {
+		border-radius: 50%;
+		box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+		display: block;
+	}
+
+	&__controls {
+		display: flex;
+		gap: 6px;
+
+		button {
+			width: 26px;
+			height: 22px;
+			padding: 0;
+			border: 0;
+			border-radius: 6px;
+			background: rgba(20, 22, 28, 0.85);
+			color: #fff;
+			font-family: sans-serif;
+			font-size: 12px;
+			line-height: 1;
+			cursor: pointer;
+
+			&:hover {
+				background: rgba(60, 64, 74, 0.9);
+			}
+		}
+	}
+}

@@ -27,6 +27,8 @@ import DeckRibbon from "~/app/objects/DeckRibbon";
 import BridgeModelObject from "~/app/objects/BridgeModelObject";
 import CollisionDebugMesh from "~/app/objects/CollisionDebugMesh";
 import SelectionRibbonMesh from "~/app/objects/SelectionRibbonMesh";
+import RoadGraphOverlayMesh from "~/app/objects/RoadGraphOverlayMesh";
+import RouteOverlayMesh from "~/app/objects/RouteOverlayMesh";
 import WorldTreeScatter from "~/app/objects/WorldTreeScatter";
 import BuildingModelObject from "~/app/objects/BuildingModelObject";
 import ModelBuildingScatter from "~/app/objects/ModelBuildingScatter";
@@ -57,6 +59,10 @@ interface SceneObjects {
 	// road, drawn by GBufferPass.renderSelectionRibbon, gated by Config.EditableRoadEditing + a live
 	// selection in editableRoadRegistry).
 	selectionRibbon: SelectionRibbonMesh;
+	roadGraphOverlay: RoadGraphOverlayMesh;
+	// Strata GPS — the active route drawn as a yellow ribbon in the world (GBufferPass.renderRouteOverlay,
+	// gated by KeyP / routeRegistry.visible), independent of the blue KeyO all-roads overlay.
+	routeOverlay: RouteOverlayMesh;
 	// Strata Lane B (s11) — world-wide model-tree scatter: per-tile clusters built from the engine's
 	// OSM forest 'tree' instance buffers, near-camera only (drawn by GBufferPass.renderWorldTreeScatter).
 	worldTreeScatter: WorldTreeScatter;
@@ -108,6 +114,8 @@ export default class SceneSystem extends System {
 		const bridgeModel = new BridgeModelObject();
 		const collisionDebug = new CollisionDebugMesh();
 		const selectionRibbon = new SelectionRibbonMesh();
+		const roadGraphOverlay = new RoadGraphOverlayMesh();
+		const routeOverlay = new RouteOverlayMesh();
 		const worldTreeScatter = new WorldTreeScatter();
 		const placedBuildings = new BuildingModelObject();
 		const modelBuildingScatter = new ModelBuildingScatter();
@@ -127,6 +135,8 @@ export default class SceneSystem extends System {
 			bridgeModel,
 			collisionDebug,
 			selectionRibbon,
+			roadGraphOverlay,
+			routeOverlay,
 			worldTreeScatter,
 			placedBuildings,
 			modelBuildingScatter
@@ -190,7 +200,7 @@ export default class SceneSystem extends System {
 		this.scene.add(wrapper);
 		wrapper.add(
 			camera, csm, skybox, tiles, labels, terrain, car, deckRibbon, bridgeModel, collisionDebug,
-			selectionRibbon, worldTreeScatter, placedBuildings, modelBuildingScatter,
+			selectionRibbon, roadGraphOverlay, routeOverlay, worldTreeScatter, placedBuildings, modelBuildingScatter,
 			...this.objects.instancedObjects.values(),
 			...this.objects.instancedAircraftParts.values()
 		);

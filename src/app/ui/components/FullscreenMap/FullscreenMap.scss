@@ -1,0 +1,77 @@
+// The full-screen "magnify" map opened from the minimap. A dark modal filling the viewport with a thin
+// header (controls) above a canvas that fills the rest.
+.fullscreenMap {
+	position: fixed;
+	inset: 0;
+	z-index: 2000;
+	display: flex;
+	flex-direction: column;
+	background: rgba(8, 9, 12, 0.96);
+	user-select: none;
+
+	&__header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 12px;
+		background: rgba(18, 20, 26, 0.95);
+		border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+		color: #fff;
+		font-family: sans-serif;
+
+		button {
+			height: 26px;
+			min-width: 30px;
+			padding: 0 8px;
+			border: 0;
+			border-radius: 6px;
+			background: rgba(40, 44, 54, 0.9);
+			color: #fff;
+			font-size: 13px;
+			line-height: 1;
+			cursor: pointer;
+
+			&:hover {
+				background: rgba(70, 76, 90, 0.95);
+			}
+		}
+	}
+
+	&__title {
+		font-size: 15px;
+		font-weight: 600;
+	}
+
+	&__hint {
+		font-size: 12px;
+		color: rgba(255, 255, 255, 0.55);
+	}
+
+	&__spacer {
+		flex: 1;
+	}
+
+	&__close {
+		background: rgba(120, 40, 40, 0.9) !important;
+
+		&:hover {
+			background: rgba(170, 55, 55, 0.95) !important;
+		}
+	}
+
+	&__canvasWrap {
+		position: relative;
+		flex: 1;
+		min-height: 0;
+	}
+
+	&__canvas {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		display: block;
+		cursor: crosshair;
+		touch-action: none;
+	}
+}
